@@ -1,0 +1,22 @@
+Extract structured information from the job description below.
+
+Return a JSON object with exactly these fields:
+- title: job title (string)
+- required_skills: non-negotiable technical skills (list of strings)
+- preferred_skills: nice-to-have skills (list of strings)
+- min_yoe: minimum years of experience required as a number (float, 0 if not specified)
+- location: required location or "Remote" (string)
+- must_haves: absolute dealbreaker requirements beyond skills (list of strings, e.g. "AWS certification", "active security clearance")
+
+EXAMPLE INPUT:
+Senior Backend Engineer — FinTech startup
+We need 5+ years of backend experience. Must have: Python, PostgreSQL.
+Nice to have: Kubernetes, Redis. Location: New York or Remote.
+Must have prior fintech or payments domain experience.
+
+EXAMPLE OUTPUT:
+{"title":"Senior Backend Engineer","required_skills":["Python","PostgreSQL"],"preferred_skills":["Kubernetes","Redis"],"min_yoe":5.0,"location":"New York or Remote","must_haves":["fintech or payments domain experience"]}
+
+Now extract from this job description:
+
+{{JD_TEXT}}

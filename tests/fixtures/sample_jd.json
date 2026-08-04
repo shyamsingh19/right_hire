@@ -1,0 +1,8 @@
+{
+  "title": "Senior Python Engineer",
+  "required_skills": ["Python", "PostgreSQL", "Docker"],
+  "preferred_skills": ["Redis", "Kubernetes", "FastAPI"],
+  "min_yoe": 4.0,
+  "location": "San Francisco, CA",
+  "must_haves": []
+}

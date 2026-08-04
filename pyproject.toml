@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ats-checker"
+version = "0.1.0"
+description = "ATS Resume Checker with pluggable LLM backend"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "pymysql",
+    "pydantic>=2.0",
+    "pydantic-settings",
+    "rq",
+    "redis",
+    "httpx",
+    "pymupdf",
+    "pdfplumber",
+    "pytesseract",
+    "openpyxl",
+    "gdown",
+    "sentence-transformers",
+    "faiss-cpu",
+    "numpy",
+    "instructor",
+    "openai",
+    "streamlit",
+    "pandas",
+    "cryptography",
+    "aiosqlite",
+    "greenlet",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx",
+    "factory-boy",
+    "pytest-cov",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "scripts*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "local: requires local Ollama instance (skip in CI)",
+    "integration: integration tests requiring external services",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

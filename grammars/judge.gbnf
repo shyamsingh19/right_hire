@@ -1,0 +1,8 @@
+root   ::= object
+object ::= "{" ws "\"scores\"" ws ":" ws score-object "," ws "\"reasons\"" ws ":" ws reason-object "," ws "\"overall_score\"" ws ":" ws number "," ws "\"verdict\"" ws ":" ws verdict ws "}"
+score-object  ::= "{" ws (string ws ":" ws number ws ("," ws string ws ":" ws number ws)*)? "}"
+reason-object ::= "{" ws (string ws ":" ws string ws ("," ws string ws ":" ws string ws)*)? "}"
+verdict ::= "\"Fit\"" | "\"Maybe\"" | "\"Reject\""
+string  ::= "\"" ([^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]))* "\""
+number  ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? (([eE] [-+]? [0-9]+))?
+ws      ::= [ \t\n]*
