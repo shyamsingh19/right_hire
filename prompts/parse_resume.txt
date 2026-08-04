@@ -1,0 +1,25 @@
+Extract structured information from the resume text below.
+
+Return a JSON object with exactly these fields:
+- name: full name of the candidate (string)
+- email: email address (string)
+- yoe: total years of professional experience as a number (float, e.g. 3.5)
+- location: city or country (string)
+- skills: list of technical and professional skills mentioned (list of strings)
+- bullets: list of key experience bullets/achievements, one sentence each (list of strings, max 10)
+
+EXAMPLE INPUT:
+John Smith | john@example.com | San Francisco, CA
+Senior Software Engineer, 6 years experience
+
+Skills: Python, Django, PostgreSQL, Docker, AWS, React
+- Built real-time data pipeline processing 1M events/day using Kafka and Python
+- Led migration of monolith to microservices, reducing deploy time by 60%
+- Mentored team of 4 junior engineers across 3 product areas
+
+EXAMPLE OUTPUT:
+{"name":"John Smith","email":"john@example.com","yoe":6.0,"location":"San Francisco, CA","skills":["Python","Django","PostgreSQL","Docker","AWS","React"],"bullets":["Built real-time data pipeline processing 1M events/day using Kafka and Python","Led migration of monolith to microservices, reducing deploy time by 60%","Mentored team of 4 junior engineers across 3 product areas"]}
+
+Now extract from this resume:
+
+{{RESUME_TEXT}}
