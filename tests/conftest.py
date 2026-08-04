@@ -1,0 +1,117 @@
+from __future__ import annotations
+
+import asyncio
+from typing import Generator
+
+import pytest
+import pytest_asyncio
+from fastapi.testclient import TestClient
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.db import Base, get_db
+from app.llm.base import LLMProvider
+from app.schemas import JudgeOutput, ParsedJD, ParsedResume
+
+# ── FakeLLMProvider ──────────────────────────────────────────────────────────
+
+class FakeLLMProvider(LLMProvider):
+    """Returns deterministic canned outputs. No GPU, no network required."""
+
+    _RESUME = ParsedResume(
+        name="Alice Dev",
+        email="alice@example.com",
+        yoe=5.0,
+        location="San Francisco, CA",
+        skills=["Python", "FastAPI", "PostgreSQL", "Docker", "Redis"],
+        bullets=[
+            "Built REST API serving 10k req/s using FastAPI and PostgreSQL",
+            "Containerised entire stack with Docker Compose",
+        ],
+    )
+    _JD = ParsedJD(
+        title="Senior Python Engineer",
+        required_skills=["Python", "PostgreSQL", "Docker"],
+        preferred_skills=["Redis", "Kubernetes"],
+        min_yoe=4.0,
+        location="San Francisco, CA",
+        must_haves=[],
+    )
+    _JUDGE = JudgeOutput(
+        scores={"technical_fit": 0.9, "experience_depth": 0.8},
+        reasons={
+            "technical_fit": "Matches all 3 required skills",
+            "experience_depth": "5 years with strong project ownership",
+        },
+        overall_score=0.85,
+        verdict="Fit",
+    )
+
+    def complete_json(self, prompt: str, schema, max_tokens: int = 256):
+        if schema is ParsedResume:
+            return self._RESUME
+        if schema is ParsedJD:
+            return self._JD
+        if schema is JudgeOutput:
+            return self._JUDGE
+        return schema()
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[0.1] * 384 for _ in texts]
+
+
+@pytest.fixture
+def fake_provider() -> FakeLLMProvider:
+    return FakeLLMProvider()
+
+
+# ── In-memory SQLite DB for tests ────────────────────────────────────────────
+
+TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
+
+
+@pytest_asyncio.fixture
+async def test_db() -> AsyncSession:
+    engine = create_async_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        yield session
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
+
+
+# ── TestClient with provider override ────────────────────────────────────────
+
+@pytest.fixture
+def client(fake_provider) -> Generator:
+    from app.main import app
+    from app.llm.factory import get_provider
+
+    app.dependency_overrides[get_provider] = lambda: fake_provider
+
+    # Override DB with SQLite
+    engine = create_async_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
+
+    async def _create_tables():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.get_event_loop().run_until_complete(_create_tables())
+
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _override_db():
+        async with factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = _override_db
+
+    with TestClient(app, raise_server_exceptions=True) as c:
+        yield c
+
+    app.dependency_overrides.clear()
