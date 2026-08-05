@@ -1,4 +1,8 @@
-.PHONY: run worker migrate seed test test-int lint eval ui
+.PHONY: run worker migrate seed test test-int lint eval ui install
+
+install:
+	pip install -r requirements-torch-cpu.txt
+	pip install -e ".[dev]"
 
 run:
 	uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
