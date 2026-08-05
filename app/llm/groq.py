@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Groq's OpenAI-compatible base URL
 _GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+_HEALTH_TIMEOUT = 5.0
 
 
 class GroqProvider(LLMProvider):
@@ -22,6 +23,17 @@ class GroqProvider(LLMProvider):
         self.api_key = settings.groq_api_key
         if not self.api_key:
             raise ValueError("GROQ_API_KEY is not set in environment")
+
+    def health_check(self) -> None:
+        """Probe Groq's /models — validates both reachability and the API key."""
+        import httpx
+
+        with httpx.Client(timeout=_HEALTH_TIMEOUT) as client:
+            resp = client.get(
+                f"{_GROQ_BASE_URL}/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+            resp.raise_for_status()
 
     def complete_json(
         self,

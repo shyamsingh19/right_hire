@@ -8,23 +8,29 @@ file hosting needed to exercise the pipeline logic itself.
 
 ## 0. Do you need "real" Redis / MySQL?
 
-**No.** The `docker compose up -d mysql redis` containers you already have
-behave identically to a hosted Redis/MySQL for everything this pipeline does
-— RQ doesn't care where its broker lives, and SQLAlchemy doesn't care where
-the DB lives. Get a hosted instance only if you specifically want to test
-network latency to a remote service or persistence across machines — neither
-matters for validating pipeline correctness or LLM judging quality. If you
-want one anyway for extra realism, free tiers exist (Upstash Redis, Railway
-or Aiven MySQL), but it's not required for anything in this guide.
+**No.** A local Redis container and a local MySQL behave identically to hosted
+ones for everything this pipeline does — RQ doesn't care where its broker
+lives, and SQLAlchemy doesn't care where the DB lives. Use the hosted services
+(filess.io MySQL, Upstash Redis) if you want to validate the real deployment
+path or network latency; neither matters for pipeline correctness or LLM
+judging quality.
 
 ## 1. Start infra
 
+`docker-compose.yml` builds only `app`/`worker` — MySQL and Redis are managed
+services, so point `.env` at whichever you're using. For a purely local run:
+
 ```bash
-docker compose up -d mysql redis
+docker run -d -p 6379:6379 redis:7-alpine
+# and a local MySQL, or leave DATABASE_URL pointing at the hosted one
 ```
 
-(Already remapped to host ports `3307`/`6380` on this machine since native
-`mysql`/`redis-server` system services own `3306`/`6379`.)
+Confirm everything (DB, Redis, and the LLM backend) is actually reachable
+before seeding — this returns `503` if any of them is down:
+
+```bash
+curl localhost:8001/health
+```
 
 ## 2. Pick an LLM backend
 

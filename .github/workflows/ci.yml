@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, main-c]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # The ingest route enqueues to a real Redis, so the integration suite needs one.
+    # MySQL is NOT needed — tests run against in-memory SQLite (see tests/conftest.py).
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # No .env in CI, so app/config.py falls back to these. Point at the service
+      # container above and keep the LLM backend unreachable-but-harmless: no test
+      # calls a real provider (FakeLLMProvider is injected via dependency_overrides).
+      REDIS_URL: redis://localhost:6379/0
+      LLM_BACKEND: local
+      OLLAMA_URL: http://localhost:11434
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: make lint
+
+      - name: Unit tests
+        run: make test
+
+      - name: Integration tests
+        run: make test-int

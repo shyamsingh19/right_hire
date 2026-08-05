@@ -6,6 +6,8 @@ import io
 
 import openpyxl
 
+from app.config import settings
+
 
 def _make_excel(rows: list[dict]) -> bytes:
     wb = openpyxl.Workbook()
@@ -21,10 +23,42 @@ def _make_excel(rows: list[dict]) -> bytes:
     return buf.getvalue()
 
 
-def test_health(client):
+def test_health_reports_every_dependency(client):
+    """Asserts structure, not liveness — CI has no Ollama, so 'degraded' is a valid
+    answer here. What must always hold is that every dependency gets reported."""
+    import app.main as main_module
+
+    main_module._llm_health_cache = None
+
     resp = client.get("/health")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
+    assert resp.status_code in (200, 503)
+    body = resp.json()
+    assert body["status"] in ("ok", "degraded")
+    assert set(body["checks"]) == {"db", "redis", "llm"}
+
+
+def test_health_degraded_when_llm_unreachable(client, monkeypatch):
+    import app.main as main_module
+
+    main_module._llm_health_cache = None
+    monkeypatch.setattr(main_module, "_check_llm", lambda: "error: connection refused")
+
+    resp = client.get("/health")
+    assert resp.status_code == 503
+    assert resp.json()["status"] == "degraded"
+    assert "connection refused" in resp.json()["checks"]["llm"]
+
+
+def test_health_ok_when_everything_reachable(client, monkeypatch):
+    import app.main as main_module
+
+    main_module._llm_health_cache = None
+    monkeypatch.setattr(main_module, "_check_llm", lambda: "ok")
+
+    resp = client.get("/health")
+    if resp.json()["checks"]["redis"] == "ok":  # skip if no Redis in this environment
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
 
 
 def test_create_job(client):
@@ -232,11 +266,46 @@ def test_request_credits_without_payment_link(client):
     assert resp.json()["payment_link"] is None
 
 
-def test_admin_grant_credits_disabled_without_key(client):
+def test_admin_grant_credits_disabled_when_unset(client, monkeypatch):
+    # Pinned explicitly rather than relying on ambient config — a developer with
+    # ADMIN_API_KEY set in their local .env would otherwise see a different result here.
+    monkeypatch.setattr(settings, "admin_api_key", "")
     resp = client.post(
         "/billing/admin/grant-credits", json={"email": "test@example.com", "credits": 10}
     )
-    assert resp.status_code == 501  # ADMIN_API_KEY unset in tests
+    assert resp.status_code == 501
+
+
+def test_admin_grant_credits_rejects_wrong_key(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_api_key", "operator-secret")
+    resp = client.post(
+        "/billing/admin/grant-credits",
+        json={"email": "test@example.com", "credits": 10},
+        headers={"X-Admin-Key": "wrong"},
+    )
+    assert resp.status_code == 401
+
+
+def test_admin_grant_credits_adds_credits(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_api_key", "operator-secret")
+    resp = client.post(
+        "/billing/admin/grant-credits",
+        json={"email": "test@example.com", "credits": 10},
+        headers={"X-Admin-Key": "operator-secret"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["credits"] == 13  # 3 free signup credits + 10
+    assert client.get("/billing/credits").json()["credits"] == 13
+
+
+def test_admin_grant_credits_unknown_email(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_api_key", "operator-secret")
+    resp = client.post(
+        "/billing/admin/grant-credits",
+        json={"email": "nobody@example.com", "credits": 10},
+        headers={"X-Admin-Key": "operator-secret"},
+    )
+    assert resp.status_code == 404
 
 
 def test_ingest_rejected_when_out_of_credits(client):

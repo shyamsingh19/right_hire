@@ -1,16 +1,12 @@
-version: "3.9"
+# Both services are stateless — MySQL and Redis are managed, not containers here.
+# MySQL: filess.io (DATABASE_URL), Redis: Upstash (UPSTASH_REDIS_REST_*), both from .env.
+# Nothing in this file listens on 3306/6379, so there's no local infra to start first.
 
 services:
   app:
     build: .
     restart: unless-stopped
     env_file: .env
-    # Overrides any UPSTASH_*/REDIS_URL from .env so the container always talks to the
-    # compose-managed redis service by its network name, not localhost or a cloud URL.
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - UPSTASH_REDIS_REST_URL=
-      - UPSTASH_REDIS_REST_TOKEN=
     ports:
       - "8000:8000"
     volumes:
@@ -22,10 +18,6 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - UPSTASH_REDIS_REST_URL=
-      - UPSTASH_REDIS_REST_TOKEN=
     volumes:
       - .:/app
       - storage_data:/app/storage

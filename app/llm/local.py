@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
 _BACKOFF_BASE = 1.5  # seconds
+_HEALTH_TIMEOUT = 5.0  # health probes must stay fast — /health is polled by load balancers
 
 
 class LocalProvider(LLMProvider):
@@ -22,6 +23,23 @@ class LocalProvider(LLMProvider):
     def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
         self.base_url = (base_url or settings.ollama_url).rstrip("/")
         self.model = model or settings.judge_model
+
+    # ── health_check ─────────────────────────────────────────────────────────
+
+    def health_check(self) -> None:
+        """Probe Ollama's /api/tags — cheap, and confirms JUDGE_MODEL is actually pulled."""
+        with httpx.Client(timeout=_HEALTH_TIMEOUT) as client:
+            resp = client.get(f"{self.base_url}/api/tags")
+            resp.raise_for_status()
+            available = {m.get("name", "") for m in resp.json().get("models", [])}
+        # Ollama reports "qwen2.5:7b"; a bare "qwen2.5" in config should still match.
+        if available and not any(
+            name.split(":")[0] == self.model.split(":")[0] for name in available
+        ):
+            raise RuntimeError(
+                f"Ollama is reachable but JUDGE_MODEL={self.model!r} is not pulled "
+                f"(available: {sorted(available) or 'none'})"
+            )
 
     # ── complete_json ────────────────────────────────────────────────────────
 

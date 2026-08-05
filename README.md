@@ -4,14 +4,18 @@ AI-powered resume screening pipeline. Upload an Excel or CSV sheet of candidates
 
 ## Quick start
 
-Everything on the host (recommended for local dev — lets `local` backend reach an Ollama
+**MySQL and Redis are managed services, not containers.** `docker-compose.yml` only builds
+`app` and `worker` — there is no local infra to start first. Point `DATABASE_URL` at your
+MySQL host (the example uses [filess.io](https://filess.io)) and Redis at either a local
+container or [Upstash](https://upstash.com).
+
+Everything on the host (recommended for local dev — lets the `local` backend reach an Ollama
 instance on `localhost` or a GPU box on your LAN):
 
 ```bash
-cp .env.example .env               # edit DB creds and LLM settings
+cp .env.example .env               # set DATABASE_URL, Redis, and LLM settings
+docker run -d -p 6379:6379 redis:7-alpine   # or use Upstash — see .env.example
 ollama pull qwen2.5:7b             # judge model
-ollama pull bge-m3                 # embeddings (or any embed model)
-docker compose up -d mysql redis   # DB + queue only — ports remapped to :3307 / :6380
 pip install -e ".[dev]"
 make migrate                       # alembic upgrade head — creates the schema
 make seed                          # loads demo job + 5 candidates (creates a demo user too)
@@ -20,15 +24,21 @@ make worker                        # RQ worker — separate terminal
 make ui                            # optional UI on :3000 (Reflex dev server)
 ```
 
-Or fully containerized (`app`/`worker` now have a `Dockerfile`):
+Or run the app and worker in containers (they read the same `.env`, so they talk to the
+same managed MySQL/Redis):
 
 ```bash
-cp .env.example .env
-# set DATABASE_URL to the in-network hostname docker-compose.yml expects:
-#   mysql+pymysql://ats:ats@mysql:3306/ats
-# (REDIS_URL is overridden automatically to the compose-managed redis service)
+cp .env.example .env               # DATABASE_URL + Upstash creds must be reachable from Docker
 docker compose up -d
 docker compose exec app alembic upgrade head
+```
+
+Check everything is wired up — this reports DB, Redis, **and** LLM-backend reachability,
+and returns `503` if any of them is down:
+
+```bash
+curl localhost:8001/health
+# {"status":"ok","checks":{"db":"ok","redis":"ok","llm":"ok"}}
 ```
 
 Every route requires an API key — multi-user, no passwords, just a bearer-style header:

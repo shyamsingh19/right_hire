@@ -8,13 +8,14 @@ AI-powered resume screening pipeline. Candidates are ingested from Excel or CSV,
 
 ## Setup
 
-`Dockerfile` and `alembic.ini` both exist now — either path works. Host path (recommended
-for `local` backend, so it can reach Ollama on `localhost` or a LAN GPU box):
+**MySQL and Redis are managed services — `docker-compose.yml` builds only `app` and
+`worker`.** There is no local infra to bring up first, and nothing in the repo listens on
+3306/6379. `DATABASE_URL` points at hosted MySQL (the example uses filess.io); Redis is
+either a plain local container or Upstash via `UPSTASH_REDIS_REST_*`.
 
 ```bash
-cp .env.example .env          # set DB creds, LLM_BACKEND, OLLAMA_URL
-docker compose up -d mysql redis   # infra only — ports remapped to :3307 (MySQL) / :6380 (Redis)
-                               # on boxes where native mysql/redis-server already own 3306/6379
+cp .env.example .env          # set DATABASE_URL, Redis, LLM_BACKEND, OLLAMA_URL
+docker run -d -p 6379:6379 redis:7-alpine   # local dev queue; or set Upstash creds instead
 pip install -e ".[dev]"
 make migrate                  # alembic upgrade head — creates the schema
 make run                      # FastAPI on :8001 (Makefile hardcodes this port, not :8000)
@@ -22,7 +23,13 @@ make worker                   # RQ worker — separate terminal
 make ui                       # optional UI on :3000 (Reflex dev server) — reads config.ini [ui] api_base
 ```
 
-`docker-compose.yml` now defines a `redis` service (previously missing — `docker compose up -d mysql redis` used to fail on a fresh checkout). Inside the `app`/`worker` containers, `REDIS_URL` is overridden to point at it automatically; the host path uses `.env`'s `REDIS_URL` (port `6380`).
+Containerized app/worker (same `.env`, same managed backing services):
+`docker compose up -d`, then `docker compose exec app alembic upgrade head`.
+
+`Settings.effective_redis_url` prefers Upstash when both `UPSTASH_REDIS_REST_*` vars hold
+**real** values, else falls back to `REDIS_URL`. Values still containing `<` are treated as
+unfilled placeholders and ignored (`Settings._is_real`) — a half-edited `.env` falls back
+instead of silently pointing the queue at a nonexistent host.
 
 Fully containerized: `docker compose up -d` (builds `app`/`worker` from the root `Dockerfile`),
 then `docker compose exec app alembic upgrade head`.
@@ -344,13 +351,13 @@ The Reflex UI is not configured through these — it reads `API_BASE` env var, f
 
 ## TODOs / known gaps
 
-- `TODO`: `make lint` / CI workflow (GitHub Actions or similar) not yet defined — lint/tests only run locally today.
+- CI runs `make lint` + `make test` + `make test-int` on push/PR (`.github/workflows/ci.yml`). It provisions a Redis service container because the ingest route enqueues to a real Redis; MySQL is deliberately absent since tests use in-memory SQLite. `make lint` scopes ruff to `app tests scripts ui` — `alembic/` is excluded on purpose so frozen migration files don't fail formatting.
 - `TODO`: `GroqProvider.embed()` always raises `NotImplementedError`; embeddings always fall back to the local SentenceTransformer. Document this if Groq is the primary backend.
 - `TODO`: True lost-key recovery (email verification) isn't implemented — `POST /auth/rotate-key` only covers voluntary rotation while you still hold a valid key. A lost key means signing up again with a new email.
 - `TODO`: The signup rate limiter (`app/api/auth.py`) is in-memory, per-process — fine for a single `make run` process, but resets on restart and doesn't share state across multiple app processes/replicas. Swap for a Redis-backed limiter before scaling out.
 - `TODO`: Billing has no automated payment collection by design (see [Billing](#billing)) — `POST /billing/admin/grant-credits` is a manual, human-run step. There's no dashboard for pending requests yet; the operator watches logs for `Credit request from user_id=...`.
 - `TODO`: `app/skills/taxonomy.json` is still tech/business-office skewed (SWE, data, and common cross-functional roles) — skill-overlap scoring will be weaker for roles outside that (trades, healthcare, legal, etc.). Scope the pitch accordingly or expand the taxonomy before selling into those verticals.
-- `TODO`: `/health` checks DB and Redis reachability but not the configured LLM backend — a broken Ollama/Groq/OpenAI connection won't show up there, only when a candidate actually fails.
-- `docker-compose.yml` maps MySQL/Redis to host ports `3307`/`6380` (not the `3306`/`6379` defaults in `config.py`) to avoid clashing with native `mysql`/`redis-server` services on dev machines — set `DATABASE_URL`/`REDIS_URL` in `.env` accordingly when running against this compose file. Inside the containers, `REDIS_URL` is overridden to the compose-network address automatically.
+- `GET /health` probes DB, Redis, **and** the configured LLM backend, returning `503` + `{"status": "degraded"}` if any is down. The LLM probe calls `LLMProvider.health_check()` — a non-abstract method with a no-op default, overridden per provider to hit a list-models endpoint (never a completion, so it never bills). Its result is cached for 30s so load-balancer polling doesn't hammer the upstream API.
+- `docker-compose.yml` builds only `app`/`worker`; MySQL and Redis are managed services configured entirely through `.env`. Don't re-add `environment:` overrides for `REDIS_URL`/`UPSTASH_*` there — they'd shadow the real credentials and point the queue at a service that doesn't exist.
 - The RQ queue name was previously inconsistent (`ingest.py` enqueued to `"default"` while `make worker` and `seed_demo.py` used `"ats"`, so candidates silently never got processed). Now fixed — everything enqueues to and consumes `"ats"`. If you add a new enqueue call, use `"ats"`, not `"default"`.
 - `[tool.ruff.lint] select` is pinned explicitly in `pyproject.toml` to pyflakes/pycodestyle only (`E4,E7,E9,F`) — newer ruff versions' unconfigured default pulls in a much larger rule set (bugbear, blind-except, etc.) that would flag idiomatic FastAPI patterns like `Depends(...)` as default-argument bugs. Don't remove that `select` line without checking `make lint` still passes cleanly.

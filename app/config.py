@@ -46,10 +46,19 @@ class Settings(BaseSettings):
     payment_link_url: str = ""  # e.g. a Stripe Payment Link / PayPal.me URL, operator's choice
     admin_api_key: str = ""  # shared secret for POST /billing/admin/grant-credits; unset = disabled
 
+    @staticmethod
+    def _is_real(value: str) -> bool:
+        """False for unset or still-a-placeholder values like `https://<name>.upstash.io`.
+        Without this, a half-filled .env builds a valid-looking URL pointing at a host
+        that doesn't exist, and the queue fails at runtime instead of falling back."""
+        return bool(value) and "<" not in value
+
     @property
     def effective_redis_url(self) -> str:
         """Return Upstash rediss:// URL when REST credentials are provided, else redis_url."""
-        if self.upstash_redis_rest_url and self.upstash_redis_rest_token:
+        if self._is_real(self.upstash_redis_rest_url) and self._is_real(
+            self.upstash_redis_rest_token
+        ):
             # REST URL is https://<host>.upstash.io — strip scheme to get hostname
             host = (
                 self.upstash_redis_rest_url.removeprefix("https://")

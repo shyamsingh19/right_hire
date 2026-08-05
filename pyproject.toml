@@ -41,6 +41,7 @@ dev = [
     "httpx",
     "factory-boy",
     "pytest-cov",
+    "ruff",
 ]
 
 [tool.setuptools.packages.find]

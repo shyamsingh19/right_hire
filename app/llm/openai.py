@@ -10,6 +10,7 @@ from app.llm.base import LLMProvider
 logger = logging.getLogger(__name__)
 
 _EMBED_MODEL = "text-embedding-3-small"
+_HEALTH_TIMEOUT = 5.0
 
 
 class OpenAIProvider(LLMProvider):
@@ -22,6 +23,17 @@ class OpenAIProvider(LLMProvider):
         self.api_key = settings.openai_api_key
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY is not set in environment")
+
+    def health_check(self) -> None:
+        """Probe OpenAI's /models — validates both reachability and the API key."""
+        import httpx
+
+        with httpx.Client(timeout=_HEALTH_TIMEOUT) as client:
+            resp = client.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+            resp.raise_for_status()
 
     def complete_json(
         self,

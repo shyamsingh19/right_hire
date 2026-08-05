@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import inspect, text
+from starlette.concurrency import run_in_threadpool
 
 from app import db
 from app.config import settings
@@ -99,10 +100,34 @@ app.include_router(ingest.router)
 app.include_router(results.router)
 
 
+# The LLM probe hits a third-party API, so its result is cached briefly — /health is
+# polled by load balancers and this must not turn into a per-request upstream call.
+_LLM_HEALTH_TTL_SECONDS = 30
+_llm_health_cache: tuple[float, str] | None = None
+
+
+def _check_llm() -> str:
+    """Returns 'ok' or an 'error: ...' string. Never raises."""
+    global _llm_health_cache
+    now = time.monotonic()
+    if _llm_health_cache and now - _llm_health_cache[0] < _LLM_HEALTH_TTL_SECONDS:
+        return _llm_health_cache[1]
+
+    try:
+        from app.llm.factory import get_provider
+
+        get_provider().health_check()
+        result = "ok"
+    except Exception as exc:
+        result = f"error: {exc}"[:200]
+
+    _llm_health_cache = (now, result)
+    return result
+
+
 @app.get("/health")
 async def health():
     checks: dict[str, str] = {}
-    healthy = True
 
     try:
         async with db.engine.connect() as conn:
@@ -110,7 +135,6 @@ async def health():
         checks["db"] = "ok"
     except Exception as exc:
         checks["db"] = f"error: {exc}"[:200]
-        healthy = False
 
     try:
         import redis as redis_lib
@@ -120,10 +144,11 @@ async def health():
         checks["redis"] = "ok"
     except Exception as exc:
         checks["redis"] = f"error: {exc}"[:200]
-        healthy = False
 
-    status_code = 200 if healthy else 503
+    checks["llm"] = await run_in_threadpool(_check_llm)
+
+    healthy = all(v == "ok" for v in checks.values())
     return JSONResponse(
-        status_code=status_code,
+        status_code=200 if healthy else 503,
         content={"status": "ok" if healthy else "degraded", "checks": checks},
     )
