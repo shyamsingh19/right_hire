@@ -130,14 +130,19 @@ def process_candidate(candidate_id: str, job_id: str) -> None:
         judge_out = judge_candidate(match_result, parsed_jd, rubric, provider)
 
         # ── Step 7: Score ────────────────────────────────────────────────────
-        final_score, verdict = aggregate_score(judge_out, match_result, weights)
+        final_score, _default_verdict, breakdown = aggregate_score(judge_out, match_result, weights)
+        # re-apply with job-level thresholds (overrides default 0.70/0.40)
         verdict = apply_thresholds(final_score, thresholds)
 
         result = {
             "verdict": verdict,
             "score": final_score,
             "rubric": judge_out.scores,
-            "reasons": {**judge_out.reasons, "matched_skills": match_result["matched_skills"]},
+            "reasons": {
+                **judge_out.reasons,
+                "matched_skills": match_result.get("matched_skills", []),
+            },
+            "score_breakdown": breakdown,
             "model_used": settings.judge_model,
         }
         _write_evaluation(session, candidate, job, result, ck)
@@ -160,13 +165,17 @@ def _write_evaluation(
     cache_key: str,
     from_cache: bool = False,
 ) -> None:
+    reasons = result.get("reasons") or {}
+    if result.get("score_breakdown"):
+        reasons = {**reasons, "_score_breakdown": result["score_breakdown"]}
+
     eval_obj = Evaluation(
         candidate_id=candidate.id,
         job_id=job.id,
         rubric=result.get("rubric"),
         score=result.get("score"),
         verdict=result.get("verdict"),
-        reasons=result.get("reasons"),
+        reasons=reasons,
         model_used=result.get("model_used", "cache" if from_cache else None),
         cache_key=cache_key,
     )

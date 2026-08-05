@@ -13,7 +13,7 @@ def _judge(overall: float = 0.8, verdict: str = "Fit") -> JudgeOutput:
 
 
 def test_fit_verdict():
-    score, verdict = aggregate_score(
+    score, verdict, _ = aggregate_score(
         _judge(0.9), {"skill_overlap": 0.9, "cosine_sim": 0.85}, {}
     )
     assert verdict == "Fit"
@@ -21,14 +21,14 @@ def test_fit_verdict():
 
 
 def test_reject_verdict():
-    score, verdict = aggregate_score(
+    score, verdict, _ = aggregate_score(
         _judge(0.1), {"skill_overlap": 0.05, "cosine_sim": 0.1}, {}
     )
     assert verdict == "Reject"
 
 
 def test_maybe_verdict():
-    score, verdict = aggregate_score(
+    score, verdict, _ = aggregate_score(
         _judge(0.55), {"skill_overlap": 0.5, "cosine_sim": 0.5}, {}
     )
     assert verdict == "Maybe"
@@ -36,7 +36,7 @@ def test_maybe_verdict():
 
 def test_custom_weights():
     # With judge weight = 1.0 only, score should be judge's overall_score
-    score, _ = aggregate_score(
+    score, _, _bd = aggregate_score(
         _judge(0.8),
         {"skill_overlap": 0.0, "cosine_sim": 0.0},
         {"skill_overlap": 0.0, "cosine": 0.0, "judge": 1.0},

@@ -91,6 +91,15 @@ def create_job_page() -> rx.Component:
                 CreateJobState.set_maybe_threshold,
             ),
             rx.cond(
+                CreateJobState.threshold_error != "",
+                rx.callout(
+                    CreateJobState.threshold_error,
+                    icon="triangle-alert",
+                    color_scheme="amber",
+                    width="100%",
+                ),
+            ),
+            rx.cond(
                 CreateJobState.error_message != "",
                 rx.callout(CreateJobState.error_message, icon="triangle-alert", color_scheme="red"),
             ),

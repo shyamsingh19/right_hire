@@ -73,6 +73,27 @@ class CandidateResponse(BaseModel):
     created_at: datetime
 
 
+class ScoreBreakdown(BaseModel):
+    """Weighted component scores that produced the final verdict."""
+    skill_overlap: float
+    cosine_sim: float
+    judge_score: float
+    weights: dict[str, float]
+    contributions: dict[str, float]
+
+
+class ReasoningCard(BaseModel):
+    """Human-readable explanation of why a candidate received their verdict."""
+    verdict: str
+    final_score: float
+    percentile: float | None = None          # 0–100, position within this job's batch
+    score_breakdown: ScoreBreakdown | None = None
+    criterion_scores: dict[str, float] = Field(default_factory=dict)
+    criterion_reasons: dict[str, str] = Field(default_factory=dict)
+    matched_skills: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
 class EvaluationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -86,6 +107,7 @@ class EvaluationResponse(BaseModel):
     model_used: str | None = None
     cache_key: str | None = None
     created_at: datetime
+    reasoning_card: ReasoningCard | None = None  # populated at read time, not stored
 
 
 class CandidateWithEval(BaseModel):
@@ -93,6 +115,18 @@ class CandidateWithEval(BaseModel):
 
     candidate: CandidateResponse
     evaluation: EvaluationResponse | None = None
+
+
+class BatchStats(BaseModel):
+    """Score distribution and derived thresholds for a job's candidate pool."""
+    job_id: str
+    total_candidates: int
+    evaluated: int
+    verdict_counts: dict[str, int]
+    percentiles: dict[str, float]            # p25, p50, p75, p90
+    histogram: list[dict]                    # [{bucket: "0.6–0.7", count: 12}, ...]
+    suggested_thresholds: dict[str, float]   # data-driven fit/maybe cutoffs
+    current_thresholds: dict[str, float]
 
 
 class BulkIngestResponse(BaseModel):

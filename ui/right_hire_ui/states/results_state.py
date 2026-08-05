@@ -12,29 +12,55 @@ VERDICT_FILTERS = ["All", "Fit", "Maybe", "Reject"]
 
 
 def _build_row(item: dict) -> dict:
-    """Flatten a CandidateWithEval dict into a display-ready row.
-
-    Score formatting is standardized to 2 decimal places everywhere (the old
-    Streamlit page mixed :.2f in the expander title with :.3f in the body —
-    an unintentional inconsistency, fixed here rather than preserved).
-    """
     c = item["candidate"]
     e = item.get("evaluation")
+    rc = e.get("reasoning_card") if e else None
+
     verdict = e["verdict"] if e else c["status"]
     score = e.get("score") if e else None
     score_display = f"{score:.2f}" if score is not None else "N/A"
 
-    rubric_rows = []
+    # Percentile from reasoning card
+    percentile = rc.get("percentile") if rc else None
+    percentile_display = f"Top {100 - int(percentile)}%" if percentile is not None else ""
+
+    # Summary sentence
+    summary = rc.get("summary", "") if rc else ""
+
+    # Matched skills from reasoning card (preferred) or reasons fallback
+    matched_skills: list[str] = []
+    if rc and rc.get("matched_skills"):
+        matched_skills = rc["matched_skills"]
+    elif e and e.get("reasons"):
+        matched_skills = e["reasons"].get("matched_skills", [])
+
+    # Score breakdown
+    breakdown: dict = (rc.get("score_breakdown") or {}) if rc else {}
+    breakdown_rows: list[dict] = []
+    if breakdown:
+        labels = {"skill_overlap": "Skill overlap", "cosine_sim": "Semantic similarity", "judge_score": "LLM judge"}
+        weights = breakdown.get("weights", {})
+        contribs = breakdown.get("contributions", {})
+        for key, label in labels.items():
+            raw_key = key.replace("_score", "").replace("cosine_sim", "cosine")
+            breakdown_rows.append({
+                "signal": label,
+                "raw": f"{breakdown.get(key, 0):.2f}",
+                "weight": f"{weights.get(raw_key, weights.get(key, 0)):.0%}",
+                "contribution": f"{contribs.get(raw_key, contribs.get(key, 0)):.2f}",
+            })
+
+    # Per-criterion rubric rows
+    rubric_rows: list[dict] = []
     if e and e.get("rubric"):
+        criterion_reasons = (rc.get("criterion_reasons") or {}) if rc else {}
         reasons = e.get("reasons") or {}
         for criterion, crit_score in e["rubric"].items():
-            rubric_rows.append(
-                {
-                    "criterion": criterion,
-                    "score": f"{crit_score:.2f}",
-                    "reason": reasons.get(criterion, ""),
-                }
-            )
+            rubric_rows.append({
+                "criterion": criterion,
+                "score": f"{crit_score:.2f}",
+                "reason": criterion_reasons.get(criterion) or reasons.get(criterion, ""),
+            })
 
     return {
         "candidate_id": c["id"],
@@ -46,6 +72,10 @@ def _build_row(item: dict) -> dict:
         "has_eval": e is not None,
         "verdict": verdict,
         "score_display": score_display,
+        "percentile_display": percentile_display,
+        "summary": summary,
+        "matched_skills": matched_skills,
+        "breakdown_rows": breakdown_rows,
         "model_used": (e.get("model_used") or "N/A") if e else "N/A",
         "rubric_rows": rubric_rows,
     }

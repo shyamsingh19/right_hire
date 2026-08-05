@@ -23,6 +23,44 @@ def _verdict_filter_select() -> rx.Component:
     )
 
 
+# ── Reasoning card sub-components ────────────────────────────────────────────
+
+def _breakdown_row(row: dict) -> rx.Component:
+    return rx.table.row(
+        rx.table.cell(row["signal"].to(str), font_weight="500"),
+        rx.table.cell(row["raw"].to(str), text_align="center"),
+        rx.table.cell(row["weight"].to(str), text_align="center", color=rx.color("gray", 10)),
+        rx.table.cell(
+            rx.badge(row["contribution"].to(str), variant="soft", color_scheme="violet", size="1"),
+            text_align="center",
+        ),
+    )
+
+
+def _score_breakdown_table(breakdown_rows) -> rx.Component:
+    return rx.vstack(
+        rx.text("Score breakdown", weight="medium", size="2"),
+        rx.table.root(
+            rx.table.header(
+                rx.table.row(
+                    rx.table.column_header_cell("Signal"),
+                    rx.table.column_header_cell("Raw score", text_align="center"),
+                    rx.table.column_header_cell("Weight", text_align="center"),
+                    rx.table.column_header_cell("Contribution", text_align="center"),
+                ),
+            ),
+            rx.table.body(
+                rx.foreach(breakdown_rows, _breakdown_row),
+            ),
+            variant="surface",
+            size="1",
+            width="100%",
+        ),
+        spacing="2",
+        width="100%",
+    )
+
+
 def _rubric_row(row: dict) -> rx.Component:
     return rx.hstack(
         rx.text(row["criterion"].to(str), weight="medium", size="2"),
@@ -33,55 +71,100 @@ def _rubric_row(row: dict) -> rx.Component:
     )
 
 
+def _skill_tag(skill: str) -> rx.Component:
+    return rx.badge(skill, variant="outline", color_scheme="blue", size="1")
+
+
+# ── Result item ───────────────────────────────────────────────────────────────
+
 def _result_header(row: dict) -> rx.Component:
     has_eval = row["has_eval"].to(bool)
+    percentile_display = row["percentile_display"].to(str)
     return rx.hstack(
         rx.cond(
             has_eval, verdict_pill(row["verdict"].to(str)), status_badge(row["status"].to(str))
         ),
         rx.text(row["name"].to(str), weight="medium"),
-        rx.text(f"score: {row['score_display'].to(str)}", size="2", color=rx.color("gray", 10)),
+        rx.text(row["score_display"].to(str), size="2", color=rx.color("gray", 10)),
+        rx.cond(
+            percentile_display != "",
+            rx.badge(percentile_display, variant="soft", color_scheme="grass", size="1"),
+        ),
         spacing="3",
         align="center",
     )
 
 
 def _result_content(row: dict) -> rx.Component:
-    has_eval = row["has_eval"].to(bool)
-    rubric_rows = row["rubric_rows"].to(list[dict[str, Any]])
+    has_eval        = row["has_eval"].to(bool)
+    rubric_rows     = row["rubric_rows"].to(list[dict[str, Any]])
+    breakdown_rows  = row["breakdown_rows"].to(list[dict[str, Any]])
+    matched_skills  = row["matched_skills"].to(list[str])
+    summary         = row["summary"].to(str)
+
     return rx.vstack(
+        # Summary callout
+        rx.cond(
+            has_eval & (summary != ""),
+            rx.callout(summary, icon="info", color_scheme="blue", size="1"),
+        ),
+
+        # Basic info grid
         rx.grid(
             rx.vstack(
                 rx.text(f"Email: {row['email'].to(str)}", size="2"),
                 rx.text(f"YOE: {row['yoe'].to(str)}", size="2"),
                 rx.text(f"Location: {row['location'].to(str)}", size="2"),
-                align="start",
-                spacing="1",
+                align="start", spacing="1",
             ),
             rx.cond(
                 has_eval,
                 rx.vstack(
                     rx.text(f"Score: {row['score_display'].to(str)}", size="2"),
                     rx.text(f"Model: {row['model_used'].to(str)}", size="2"),
-                    align="start",
-                    spacing="1",
+                    align="start", spacing="1",
                 ),
             ),
             columns="2",
             width="100%",
             spacing="4",
         ),
+
+        # Matched skills
+        rx.cond(
+            matched_skills.length() > 0,
+            rx.vstack(
+                rx.text("Matched skills", weight="medium", size="2"),
+                rx.flex(
+                    rx.foreach(matched_skills, _skill_tag),
+                    wrap="wrap",
+                    gap="1",
+                ),
+                align="start",
+                spacing="2",
+                width="100%",
+            ),
+        ),
+
+        # Score breakdown table
+        rx.cond(
+            breakdown_rows.length() > 0,
+            _score_breakdown_table(breakdown_rows),
+        ),
+
+        # Per-criterion rubric
         rx.cond(
             rubric_rows.length() > 0,
             rx.vstack(
-                rx.text("Rubric scores:", weight="medium", size="2"),
+                rx.text("Rubric scores", weight="medium", size="2"),
                 rx.foreach(rubric_rows, _rubric_row),
                 align="start",
                 spacing="2",
                 width="100%",
             ),
         ),
-        spacing="3",
+
+        spacing="4",
         width="100%",
         padding_top="0.75em",
     )
@@ -94,6 +177,8 @@ def _result_item(row: dict) -> rx.Component:
         value=row["candidate_id"].to(str),
     )
 
+
+# ── Page ──────────────────────────────────────────────────────────────────────
 
 def results_page() -> rx.Component:
     return page_shell(

@@ -29,10 +29,23 @@ class CreateJobState(AppState):
     def set_maybe_threshold(self, value: list[float]) -> None:
         self.maybe_threshold = value[0]
 
+    @rx.var
+    def threshold_error(self) -> str:
+        if self.maybe_threshold >= self.fit_threshold:
+            return (
+                f"Maybe threshold ({self.maybe_threshold:.2f}) must be lower than "
+                f"Fit threshold ({self.fit_threshold:.2f}). "
+                "Increase Fit or decrease Maybe."
+            )
+        return ""
+
     async def submit(self):
         self.error_message = ""
         if not self.title or not self.jd_raw:
             self.error_message = "Title and job description are required."
+            return
+        if self.maybe_threshold >= self.fit_threshold:
+            self.error_message = self.threshold_error
             return
 
         self.is_submitting = True
