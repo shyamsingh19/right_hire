@@ -13,6 +13,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "alembic",
     "pymysql",
+    "aiomysql",
     "pydantic>=2.0",
     "pydantic-settings",
     "rq",
@@ -29,8 +30,6 @@ dependencies = [
     "instructor",
     "openai",
     "streamlit",
-    "pandas",
-    "cryptography",
     "aiosqlite",
     "greenlet",
 ]
