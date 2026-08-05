@@ -22,6 +22,8 @@ make worker                   # RQ worker — separate terminal
 make ui                       # optional UI on :3000 (Reflex dev server) — reads config.ini [ui] api_base
 ```
 
+`docker-compose.yml` now defines a `redis` service (previously missing — `docker compose up -d mysql redis` used to fail on a fresh checkout). Inside the `app`/`worker` containers, `REDIS_URL` is overridden to point at it automatically; the host path uses `.env`'s `REDIS_URL` (port `6380`).
+
 Fully containerized: `docker compose up -d` (builds `app`/`worker` from the root `Dockerfile`),
 then `docker compose exec app alembic upgrade head`.
 
@@ -32,7 +34,8 @@ running both against the same DB will fight each other (`create_all` can't add c
 table Alembic already created differently).
 
 Every route requires `X-API-Key` (see [Auth](#auth) below) — get one via `POST /auth/signup`
-before calling anything else, or use the UI's sidebar sign-up box.
+before calling anything else, or use the UI's sidebar sign-up box. Signup grants
+`SIGNUP_FREE_CREDITS` (default 3) trial credits; see [Billing](#billing) below.
 
 Switch LLM backend (no code change):
 ```bash
@@ -91,8 +94,8 @@ app/
   auth.py          # API-key auth: hash/verify + get_current_user dependency
   models.py        # ORM: User, Job, Candidate, Evaluation
   schemas.py       # Pydantic: ParsedResume, ParsedJD, JudgeOutput, API I/O
-  main.py          # FastAPI app + router registration
-  api/             # Route handlers (auth, jobs, ingest, results)
+  main.py          # FastAPI app + router registration, logging, request-ID middleware, /health
+  api/             # Route handlers (auth, billing, jobs, ingest, results)
   llm/             # LLM abstraction layer (see below)
   pipeline/        # One file per stage: ingest, parse, filters, embed, match, judge, score
   skills/          # taxonomy.json + canonicalize.py (MiniLM similarity)
@@ -159,8 +162,12 @@ async def list_jobs(db=Depends(get_db), user: User = Depends(get_current_user)):
 ```
 
 - `POST /auth/signup {email}` → creates a `User`, returns the raw key **once**. Only its
-  SHA-256 hash (`User.api_key_hash`) is stored — there's no way to recover a lost key, only
-  issue a new user.
+  SHA-256 hash (`User.api_key_hash`) is stored. Rate-limited to 5 signups/hour per client IP
+  (in-memory, per-process — see `_check_signup_rate_limit` in `app/api/auth.py`).
+- `POST /auth/rotate-key` (authenticated with the *current* key) issues a new key and
+  invalidates the old one immediately. This is voluntary rotation, not lost-key recovery — a
+  truly lost key still means signing up again, since there's no email-verification flow to
+  prove ownership of an existing account. Fine for MVP.
 - `Job.user_id` scopes ownership; `Candidate`/`Evaluation` inherit scoping transitively through
   their `job_id`. Every route that takes a `job_id` must call `app.api.jobs._get_owned_job()`
   (or otherwise filter by `Job.user_id == user.id`) — it 404s (not 403) on someone else's job,
@@ -170,22 +177,45 @@ async def list_jobs(db=Depends(get_db), user: User = Depends(get_current_user)):
 
 ---
 
+## Billing
+
+Deliberately manual for MVP — no card data or payment webhooks touch this app, so there's no
+PCI surface and no payment-policy pages to have ready yet. See `app/api/billing.py`.
+
+- Every user starts with `SIGNUP_FREE_CREDITS` (default 3). 1 credit = 1 candidate queued for
+  evaluation (`app/api/ingest.py` checks `user.credits` before accepting a batch and returns
+  `402` if there aren't enough; deducts only for rows actually enqueued).
+- `POST /billing/request-credits` logs the request and returns `PAYMENT_LINK_URL` (an external
+  page — Stripe Payment Link, PayPal.me, whatever the operator sets up) if configured.
+- `POST /billing/admin/grant-credits {email, credits}` — the operator calls this **by hand**
+  after manually confirming a payment came in, authenticated with a shared `ADMIN_API_KEY`
+  header (`X-Admin-Key`), not a per-user key. Disabled (`501`) if `ADMIN_API_KEY` is unset.
+- `GET /billing/credits` — current balance for the caller.
+
+---
+
 ## Data models
 
 | Table | Key columns |
 |---|---|
-| `users` | id (UUID str), email (unique), api_key_hash (sha256 hex, unique) |
+| `users` | id (UUID str), email (unique), api_key_hash (sha256 hex, unique), credits (int, default 3) |
 | `jobs` | id (UUID str), user_id (FK → users), title, jd_raw, jd_parsed (JSON), weights (JSON), thresholds (JSON) |
 | `candidates` | id, job_id, name, email, yoe (float), location, resume_url, resume_text, parsed (JSON), embedding (LONGBLOB), status |
 | `evaluations` | id, candidate_id, job_id, rubric (JSON), score (float), verdict (Fit/Maybe/Reject), reasons (JSON), model_used, cache_key |
 
 - `Candidate.status` enum: `pending → processing → done | failed`. A `failed` candidate always
   gets an `Evaluation` row with `reasons.error` set (no score/verdict) — worker exceptions are
-  never silent, see `workers/tasks.py`'s except block.
-- `Evaluation.cache_key` = `sha256(resume_text + json(jd_parsed))` — used for Redis verdict caching
+  never silent, see `workers/tasks.py`'s except block. Enqueue failures in `app/api/ingest.py`
+  are recorded the same way, so nothing sits at `pending` forever with no visible cause.
+- `Evaluation.cache_key` = `sha256(resume_text + json(jd_parsed) + json(weights) + json(thresholds))`
+  — weights/thresholds are part of the key so recalibrating a job's thresholds doesn't serve a
+  stale cached verdict from before the change.
 - Embeddings stored as `float32` bytes: use `vec_to_bytes()` / `bytes_to_vec()` from `app/pipeline/embed.py`
+- No DB-level `ON DELETE CASCADE` from `evaluations`/`candidates` to their parents — code that
+  deletes a candidate (`DELETE /jobs/{id}/candidates/{id}`) must delete its `Evaluation` row
+  explicitly first.
 
-Schema changes require a new Alembic migration (`alembic revision --autogenerate -m "..."` then `make migrate`). Never edit existing migration files — the baseline is `alembic/versions/0001_initial_schema.py`.
+Schema changes require a new Alembic migration (`alembic revision --autogenerate -m "..."` then `make migrate`). Never edit existing migration files — the latest is `alembic/versions/0002_add_user_credits.py`.
 
 ---
 
@@ -195,6 +225,7 @@ Each stage is a pure function in its own file. The RQ task in `workers/tasks.py`
 
 | Stage | File | Contract |
 |---|---|---|
+| Resolve resume | `workers/tasks.py:_resolve_resume_text` | Fetches `resume_url` (Drive/HTTP via `pipeline/ingest.py:fetch_drive_file`) if no local file/text yet; raises (→ candidate marked `failed`) if no text can be produced — never silently scores an empty resume |
 | Extract text | `pipeline/parse.py:extract_text` | pymupdf → pdfplumber → Tesseract cascade |
 | Parse resume | `pipeline/parse.py:parse_resume` | LLM → `ParsedResume` |
 | Parse JD | `pipeline/parse.py:parse_jd` | LLM → `ParsedJD` |
@@ -298,9 +329,12 @@ def test_something(fake_provider):
 | `STORAGE_DIR` | `./storage` | Resume file storage path |
 | `GROQ_API_KEY` | _(empty)_ | Required when `LLM_BACKEND=groq` |
 | `OPENAI_API_KEY` | _(empty)_ | Required when `LLM_BACKEND=openai` |
-| `CORS_ORIGINS` | `*` | Comma-separated allowlist, e.g. `https://app.example.com,http://localhost:3000` |
-| `MAX_UPLOAD_MB` | `10` | Hard cap on candidate-sheet upload size |
-| `AUTO_CREATE_TABLES` | `true` | Dev convenience via `create_all`; set `false` where Alembic owns the schema |
+| `CORS_ORIGINS` | `*` | Comma-separated allowlist, e.g. `https://app.example.com,http://localhost:3000` — a startup warning logs if left as `*` |
+| `MAX_UPLOAD_MB` | `10` | Hard cap on candidate-sheet and resume-file upload size |
+| `AUTO_CREATE_TABLES` | `true` | Dev convenience via `create_all`; auto-skipped (with a warning) if an `alembic_version` table already exists |
+| `SIGNUP_FREE_CREDITS` | `3` | Trial credits granted on signup, no payment needed |
+| `PAYMENT_LINK_URL` | _(empty)_ | External payment page shown by `POST /billing/request-credits` |
+| `ADMIN_API_KEY` | _(empty)_ | Shared secret for `POST /billing/admin/grant-credits`; endpoint disabled if unset |
 
 `config.py` auto-derives `async_database_url` by replacing `pymysql` → `aiomysql` (or `sqlite` → `aiosqlite` for tests).
 
@@ -311,10 +345,12 @@ The Reflex UI is not configured through these — it reads `API_BASE` env var, f
 ## TODOs / known gaps
 
 - `TODO`: `make lint` / CI workflow (GitHub Actions or similar) not yet defined — lint/tests only run locally today.
-- `TODO`: `eval_harness.py` expects a labeled CSV (`candidate_id,expected_verdict`) — no sample provided.
 - `TODO`: `GroqProvider.embed()` always raises `NotImplementedError`; embeddings always fall back to the local SentenceTransformer. Document this if Groq is the primary backend.
-- `TODO`: No password-reset / key-rotation endpoint — a lost API key means signing up again with a new email. Fine for MVP, revisit if this becomes a real support burden.
-- `TODO`: Results UI doesn't paginate past the backend's default 50-row page (`GET /jobs/{id}/results` supports `offset`/`limit`, the UI just doesn't send them yet).
-- `docker-compose.yml` maps MySQL/Redis to host ports `3307`/`6380` (not the `3306`/`6379` defaults in `config.py`) to avoid clashing with native `mysql`/`redis-server` services on dev machines — set `DATABASE_URL`/`REDIS_URL` in `.env` accordingly when running against this compose file.
+- `TODO`: True lost-key recovery (email verification) isn't implemented — `POST /auth/rotate-key` only covers voluntary rotation while you still hold a valid key. A lost key means signing up again with a new email.
+- `TODO`: The signup rate limiter (`app/api/auth.py`) is in-memory, per-process — fine for a single `make run` process, but resets on restart and doesn't share state across multiple app processes/replicas. Swap for a Redis-backed limiter before scaling out.
+- `TODO`: Billing has no automated payment collection by design (see [Billing](#billing)) — `POST /billing/admin/grant-credits` is a manual, human-run step. There's no dashboard for pending requests yet; the operator watches logs for `Credit request from user_id=...`.
+- `TODO`: `app/skills/taxonomy.json` is still tech/business-office skewed (SWE, data, and common cross-functional roles) — skill-overlap scoring will be weaker for roles outside that (trades, healthcare, legal, etc.). Scope the pitch accordingly or expand the taxonomy before selling into those verticals.
+- `TODO`: `/health` checks DB and Redis reachability but not the configured LLM backend — a broken Ollama/Groq/OpenAI connection won't show up there, only when a candidate actually fails.
+- `docker-compose.yml` maps MySQL/Redis to host ports `3307`/`6380` (not the `3306`/`6379` defaults in `config.py`) to avoid clashing with native `mysql`/`redis-server` services on dev machines — set `DATABASE_URL`/`REDIS_URL` in `.env` accordingly when running against this compose file. Inside the containers, `REDIS_URL` is overridden to the compose-network address automatically.
 - The RQ queue name was previously inconsistent (`ingest.py` enqueued to `"default"` while `make worker` and `seed_demo.py` used `"ats"`, so candidates silently never got processed). Now fixed — everything enqueues to and consumes `"ats"`. If you add a new enqueue call, use `"ats"`, not `"default"`.
 - `[tool.ruff.lint] select` is pinned explicitly in `pyproject.toml` to pyflakes/pycodestyle only (`E4,E7,E9,F`) — newer ruff versions' unconfigured default pulls in a much larger rule set (bugbear, blind-except, etc.) that would flag idiomatic FastAPI patterns like `Depends(...)` as default-argument bugs. Don't remove that `select` line without checking `make lint` still passes cleanly.

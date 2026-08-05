@@ -214,12 +214,25 @@ def results_page() -> rx.Component:
                     rx.cond(
                         ResultsState.has_loaded & (ResultsState.display_rows.length() == 0),
                         empty_state("No results found.", icon="search-x"),
-                        rx.accordion.root(
-                            rx.foreach(ResultsState.display_rows, _result_item),
-                            type="multiple",
-                            collapsible=True,
-                            variant="surface",
-                            width="100%",
+                        rx.fragment(
+                            rx.accordion.root(
+                                rx.foreach(ResultsState.display_rows, _result_item),
+                                type="multiple",
+                                collapsible=True,
+                                variant="surface",
+                                width="100%",
+                            ),
+                            rx.cond(
+                                ResultsState.has_more,
+                                rx.button(
+                                    "Load more",
+                                    on_click=ResultsState.load_more,
+                                    loading=ResultsState.is_loading,
+                                    variant="soft",
+                                    size="2",
+                                    margin_top="0.75em",
+                                ),
+                            ),
                         ),
                     ),
                     width="100%",

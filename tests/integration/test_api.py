@@ -199,3 +199,158 @@ def test_upload_rejected_for_other_users_job(client, other_user_headers):
         headers=other_user_headers,
     )
     assert resp.status_code == 404
+
+
+def test_rotate_key_invalidates_old_key(client):
+    old_key = client.headers["X-API-Key"]
+    resp = client.post("/auth/rotate-key")
+    assert resp.status_code == 200
+    new_key = resp.json()["api_key"]
+    assert new_key != old_key
+
+    assert client.get("/jobs", headers={"X-API-Key": old_key}).status_code == 401
+    assert client.get("/jobs", headers={"X-API-Key": new_key}).status_code == 200
+
+
+def test_signup_grants_free_credits(client):
+    resp = client.post("/auth/signup", json={"email": "credits@example.com"})
+    assert resp.json()["credits"] == 3  # settings.signup_free_credits default
+
+
+# ── Billing ──────────────────────────────────────────────────────────────────
+
+
+def test_get_credits(client):
+    resp = client.get("/billing/credits")
+    assert resp.status_code == 200
+    assert resp.json()["credits"] == 3
+
+
+def test_request_credits_without_payment_link(client):
+    resp = client.post("/billing/request-credits")
+    assert resp.status_code == 200
+    assert resp.json()["payment_link"] is None
+
+
+def test_admin_grant_credits_disabled_without_key(client):
+    resp = client.post(
+        "/billing/admin/grant-credits", json={"email": "test@example.com", "credits": 10}
+    )
+    assert resp.status_code == 501  # ADMIN_API_KEY unset in tests
+
+
+def test_ingest_rejected_when_out_of_credits(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+
+    # Default test user has 3 free credits; a 4-row batch exceeds that.
+    csv_bytes = b"name,email\n" + b"\n".join(f"P{i},p{i}@test.com".encode() for i in range(4))
+    resp = client.post(
+        f"/jobs/{job_id}/candidates",
+        files={"file": ("c.csv", csv_bytes, "text/csv")},
+    )
+    assert resp.status_code == 402
+
+
+def test_ingest_deducts_credits(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+
+    csv_bytes = b"name,email\nAlice,alice@test.com\nBob,bob@test.com\n"
+    resp = client.post(
+        f"/jobs/{job_id}/candidates", files={"file": ("c.csv", csv_bytes, "text/csv")}
+    )
+    assert resp.status_code == 202
+
+    assert client.get("/billing/credits").json()["credits"] == 1  # 3 - 2
+
+
+# ── Candidate lifecycle ────────────────────────────────────────────────────────
+
+
+def test_delete_candidate(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+
+    ingest = client.post(
+        f"/jobs/{job_id}/candidates",
+        files={"file": ("c.csv", b"name,email\nAlice,alice@test.com\n", "text/csv")},
+    )
+    candidate_id = ingest.json()["candidate_ids"][0]
+
+    resp = client.delete(f"/jobs/{job_id}/candidates/{candidate_id}")
+    assert resp.status_code == 204
+
+    results = client.get(f"/jobs/{job_id}/results").json()
+    assert candidate_id not in [r["candidate"]["id"] for r in results]
+
+
+def test_delete_candidate_not_found(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+    resp = client.delete(f"/jobs/{job_id}/candidates/nonexistent-id")
+    assert resp.status_code == 404
+
+
+def test_upload_candidate_resume_file(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+
+    ingest = client.post(
+        f"/jobs/{job_id}/candidates",
+        files={"file": ("c.csv", b"name,email\nAlice,alice@test.com\n", "text/csv")},
+    )
+    candidate_id = ingest.json()["candidate_ids"][0]
+
+    resp = client.post(
+        f"/jobs/{job_id}/candidates/{candidate_id}/resume",
+        files={"file": ("resume.txt", b"5 years Python experience.", "text/plain")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["queued_count"] == 1
+
+
+def test_upload_candidate_resume_rejects_bad_extension(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+    ingest = client.post(
+        f"/jobs/{job_id}/candidates",
+        files={"file": ("c.csv", b"name,email\nAlice,alice@test.com\n", "text/csv")},
+    )
+    candidate_id = ingest.json()["candidate_ids"][0]
+
+    resp = client.post(
+        f"/jobs/{job_id}/candidates/{candidate_id}/resume",
+        files={"file": ("resume.docx", b"not a real docx", "application/msword")},
+    )
+    assert resp.status_code == 400
+
+
+def test_ingest_rejects_corrupt_xlsx_signature(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+    resp = client.post(
+        f"/jobs/{job_id}/candidates",
+        files={
+            "file": (
+                "candidates.xlsx",
+                b"not actually a zip",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_export_results_csv(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+    client.post(
+        f"/jobs/{job_id}/candidates",
+        files={"file": ("c.csv", b"name,email\nAlice,alice@test.com\n", "text/csv")},
+    )
+
+    resp = client.get(f"/jobs/{job_id}/results/export")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "Alice" in resp.text

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.db import get_db
+from app.llm.base import LLMProvider
 from app.llm.factory import get_provider
 from app.models import Candidate, Evaluation, Job, User
 from app.pipeline.parse import parse_jd
@@ -19,8 +20,8 @@ async def create_job(
     body: JobCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    provider: LLMProvider = Depends(get_provider),
 ):
-    provider = get_provider()
     parsed_jd = parse_jd(body.jd_raw, provider)
 
     job = Job(

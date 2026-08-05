@@ -8,5 +8,14 @@
   "REST API", "GraphQL", "gRPC", "Microservices", "Event-driven architecture",
   "Apache Kafka", "RabbitMQ", "Celery", "Apache Spark", "dbt",
   "Pandas", "NumPy", "Jupyter", "Matplotlib", "Tableau", "Power BI",
-  "Agile", "Scrum", "JIRA", "Product Management", "System Design", "Data Structures", "Algorithms"
+  "Agile", "Scrum", "JIRA", "Product Management", "Project Management", "System Design", "Data Structures", "Algorithms",
+  "Sales", "Business Development", "Account Management", "Customer Success", "Negotiation",
+  "Marketing", "Digital Marketing", "SEO", "Content Writing", "Copywriting", "Social Media Marketing",
+  "Financial Analysis", "Accounting", "Budgeting", "Forecasting", "Bookkeeping",
+  "Human Resources", "Recruiting", "Talent Acquisition", "Onboarding", "Payroll",
+  "Operations Management", "Supply Chain", "Logistics", "Vendor Management", "Procurement",
+  "Legal Compliance", "Contract Management", "Risk Management",
+  "UX Design", "UI Design", "Graphic Design", "Figma", "Adobe Creative Suite",
+  "Excel", "PowerPoint", "Public Speaking", "Leadership", "Team Management", "Stakeholder Management",
+  "Customer Support", "Technical Support", "Training", "Curriculum Development"
 ]

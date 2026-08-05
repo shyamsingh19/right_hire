@@ -3,6 +3,10 @@
 
 CSV format: candidate_id,expected_verdict
 Verdicts: Fit, Maybe, Reject
+
+tests/fixtures/eval_sample.csv is a template showing the expected shape — swap in real
+candidate_id values (from `GET /jobs/{id}/results`, or the `candidates.id` column) and
+your own human-labeled verdicts before running this for real.
 """
 
 from __future__ import annotations

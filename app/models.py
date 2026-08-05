@@ -9,6 +9,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Integer,
     LargeBinary,
     String,
     Text,
@@ -44,6 +45,9 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     api_key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # 1 credit = 1 candidate queued for evaluation. Free signup grant + manual,
+    # human-approved top-ups — see app/api/billing.py.
+    credits: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

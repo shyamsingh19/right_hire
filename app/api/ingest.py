@@ -2,27 +2,69 @@ from __future__ import annotations
 
 import logging
 import uuid
+from pathlib import Path
 
 import redis as redis_lib
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from rq import Retry, Queue
+from rq import Queue, Retry
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.jobs import _get_owned_job
 from app.auth import get_current_user
 from app.config import settings
 from app.db import get_db
-from app.models import Candidate, CandidateStatus, User
-from app.pipeline.ingest import parse_csv, parse_excel
+from app.models import Candidate, CandidateStatus, Evaluation, User
+from app.pipeline.ingest import parse_csv, parse_excel, save_resume
 from app.schemas import BulkIngestResponse
 
 router = APIRouter(prefix="/jobs", tags=["ingest"])
 logger = logging.getLogger(__name__)
 
+_RESUME_EXTENSIONS = {".pdf", ".txt", ".md"}  # must match app/pipeline/parse.py:extract_text
+
 
 def _get_queue() -> Queue:
     r = redis_lib.from_url(settings.effective_redis_url)
     return Queue("ats", connection=r)
+
+
+def _validate_sheet_signature(filename: str, content: bytes) -> None:
+    """Extension-independent sanity check — catches renamed/corrupt uploads early."""
+    if filename.endswith(".xlsx"):
+        if content[:4] != b"PK\x03\x04":
+            raise HTTPException(
+                status_code=422, detail="File does not look like a valid .xlsx (bad zip header)"
+            )
+    elif filename.endswith(".csv"):
+        try:
+            content[:4096].decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=422, detail="File does not look like valid UTF-8 CSV text"
+            ) from exc
+
+
+def _enqueue_candidates(
+    queue: Queue, job_id: str, candidate_ids: list[str]
+) -> tuple[list[str], list[str]]:
+    """Enqueue each candidate; returns (queued_ids, failed_ids). Never raises."""
+    queued: list[str] = []
+    failed: list[str] = []
+    for cid in candidate_ids:
+        try:
+            queue.enqueue(
+                "app.workers.tasks.process_candidate",
+                cid,
+                job_id,
+                job_timeout=600,
+                retry=Retry(max=3, interval=[10, 30, 60]),
+            )
+            queued.append(cid)
+        except Exception as exc:
+            logger.warning("Failed to enqueue candidate %s: %s", cid, exc)
+            failed.append(cid)
+    return queued, failed
 
 
 @router.post("/{job_id}/candidates", response_model=BulkIngestResponse, status_code=202)
@@ -48,6 +90,8 @@ async def ingest_candidates(
         raise HTTPException(
             status_code=413, detail=f"File exceeds max upload size ({settings.max_upload_mb} MB)"
         )
+    _validate_sheet_signature(filename, content)
+
     try:
         rows = parser(content)
     except Exception as exc:
@@ -56,7 +100,15 @@ async def ingest_candidates(
     if not rows:
         raise HTTPException(status_code=422, detail="File contains no data rows")
 
-    queue = _get_queue()
+    if user.credits < len(rows):
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Not enough credits: {user.credits} available, {len(rows)} required for this "
+                "batch (1 credit = 1 candidate). Request more via POST /billing/request-credits."
+            ),
+        )
+
     candidate_ids: list[str] = []
 
     for row in rows:
@@ -83,18 +135,127 @@ async def ingest_candidates(
     await db.commit()
 
     # Enqueue after commit so IDs are persisted
-    for cid in candidate_ids:
-        try:
-            queue.enqueue(
-                "app.workers.tasks.process_candidate",
-                cid,
-                job_id,
-                job_timeout=600,
-                retry=Retry(max=3, interval=[10, 30, 60]),
+    queue = _get_queue()
+    queued_ids, failed_ids = _enqueue_candidates(queue, job_id, candidate_ids)
+
+    if failed_ids:
+        # Don't leave these silently "pending" forever — mark them failed with a reason
+        # visible in the Results UI, same pattern as worker-side failures.
+        await db.execute(
+            update(Candidate)
+            .where(Candidate.id.in_(failed_ids))
+            .values(status=CandidateStatus.failed)
+        )
+        for fid in failed_ids:
+            db.add(
+                Evaluation(
+                    candidate_id=fid,
+                    job_id=job_id,
+                    reasons={"error": "Failed to queue for processing — check Redis connectivity"},
+                    model_used="error",
+                )
             )
-        except Exception as exc:
-            logger.warning("Failed to enqueue candidate %s: %s", cid, exc)
+
+    user.credits -= len(queued_ids)
+    db.add(user)
+    await db.commit()
+
+    if not queued_ids and failed_ids:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not queue any candidates for processing — the queue service is "
+            "unreachable. Candidates were saved as 'failed'; retry once Redis is back up.",
+        )
 
     return BulkIngestResponse(
-        job_id=job_id, queued_count=len(candidate_ids), candidate_ids=candidate_ids
+        job_id=job_id,
+        queued_count=len(queued_ids),
+        candidate_ids=queued_ids,
+        failed_count=len(failed_ids),
     )
+
+
+async def _get_owned_candidate(
+    db: AsyncSession, job_id: str, candidate_id: str, user: User
+) -> Candidate:
+    await _get_owned_job(db, job_id, user)
+    candidate = await db.get(Candidate, candidate_id)
+    if not candidate or candidate.job_id != job_id:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    return candidate
+
+
+@router.post("/{job_id}/candidates/{candidate_id}/resume", response_model=BulkIngestResponse)
+async def upload_candidate_resume(
+    job_id: str,
+    candidate_id: str,
+    file: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Attach a resume file directly to a candidate (alternative to resume_url), then
+    re-queue it. Costs 1 credit, same as a sheet row."""
+    candidate = await _get_owned_candidate(db, job_id, candidate_id, user)
+
+    filename = file.filename or ""
+    ext = Path(filename).suffix.lower()
+    if ext not in _RESUME_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported resume type {ext!r}. Accepted: {sorted(_RESUME_EXTENSIONS)}",
+        )
+
+    content = await file.read()
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413, detail=f"File exceeds max upload size ({settings.max_upload_mb} MB)"
+        )
+
+    if user.credits < 1:
+        raise HTTPException(status_code=402, detail="Not enough credits to evaluate this resume")
+
+    path = save_resume(candidate.id, content, ext)
+    candidate.resume_url = path
+    candidate.resume_text = None
+    candidate.status = CandidateStatus.pending
+    user.credits -= 1
+    db.add(user)
+    await db.commit()
+
+    queue = _get_queue()
+    queued_ids, failed_ids = _enqueue_candidates(queue, job_id, [candidate.id])
+    if failed_ids:
+        user.credits += 1  # refund — never got queued
+        db.add(user)
+        await db.commit()
+        raise HTTPException(status_code=503, detail="Could not queue candidate for processing")
+
+    return BulkIngestResponse(
+        job_id=job_id, queued_count=1, candidate_ids=queued_ids, failed_count=0
+    )
+
+
+@router.delete("/{job_id}/candidates/{candidate_id}", status_code=204)
+async def delete_candidate(
+    job_id: str,
+    candidate_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete a candidate and their evaluation — for GDPR-style removal requests."""
+    candidate = await _get_owned_candidate(db, job_id, candidate_id, user)
+
+    if candidate.resume_url:
+        resume_path = Path(candidate.resume_url)
+        storage_root = Path(settings.storage_dir).resolve()
+        try:
+            if resume_path.exists() and resume_path.resolve().is_relative_to(storage_root):
+                resume_path.unlink()
+        except OSError:
+            logger.warning("Could not delete stored resume file for candidate %s", candidate_id)
+
+    # No ORM cascade configured on the Evaluation FK — delete it explicitly first.
+    await db.execute(delete(Evaluation).where(Evaluation.candidate_id == candidate_id))
+    await db.delete(candidate)
+    await db.commit()

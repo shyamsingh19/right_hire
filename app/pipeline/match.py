@@ -36,6 +36,12 @@ def compute_cosine(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
     """Cosine similarity between two vectors (assumes L2-normalised inputs)."""
     a = vec_a.flatten().astype(np.float64)
     b = vec_b.flatten().astype(np.float64)
+    if a.shape != b.shape:
+        raise ValueError(
+            f"Embedding dimension mismatch ({a.shape[0]} vs {b.shape[0]}) — EMBED_MODEL "
+            "likely changed after this candidate was embedded. Re-run the pipeline for "
+            "affected candidates."
+        )
     norm_a = np.linalg.norm(a)
     norm_b = np.linalg.norm(b)
     if norm_a == 0 or norm_b == 0:
