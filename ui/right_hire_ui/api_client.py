@@ -39,6 +39,33 @@ async def signup(email: str) -> dict:
         return resp.json()
 
 
+async def rotate_key(api_key: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{API_BASE}/auth/rotate-key", headers=_headers(api_key), timeout=10
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def get_credits(api_key: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{API_BASE}/billing/credits", headers=_headers(api_key), timeout=10
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def request_credits(api_key: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{API_BASE}/billing/request-credits", headers=_headers(api_key), timeout=10
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
 async def get_jobs(api_key: str) -> list[dict]:
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{API_BASE}/jobs", headers=_headers(api_key), timeout=10)
@@ -95,7 +122,52 @@ async def get_results(
         return resp.json()
 
 
+async def upload_resume(
+    api_key: str, job_id: str, candidate_id: str, filename: str, data: bytes, content_type: str
+) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{API_BASE}/jobs/{job_id}/candidates/{candidate_id}/resume",
+            headers=_headers(api_key),
+            files={"file": (filename, data, content_type)},
+            timeout=60,
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def delete_candidate(api_key: str, job_id: str, candidate_id: str) -> None:
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(
+            f"{API_BASE}/jobs/{job_id}/candidates/{candidate_id}",
+            headers=_headers(api_key),
+            timeout=30,
+        )
+        await _raise_for_status(resp)
+
+
+async def export_results_csv(api_key: str, job_id: str, verdict_filter: str) -> str:
+    """Returns the CSV body as text. Fetched here rather than linked directly because the
+    export route needs the X-API-Key header, which a plain browser <a href> can't send."""
+    params = {} if verdict_filter == "All" else {"verdict": verdict_filter}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{API_BASE}/jobs/{job_id}/results/export",
+            headers=_headers(api_key),
+            params=params,
+            timeout=60,
+        )
+        await _raise_for_status(resp)
+        return resp.text
+
+
 def infer_content_type(filename: str) -> str:
     if filename.endswith(".csv"):
         return "text/csv"
     return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def infer_resume_content_type(filename: str) -> str:
+    if filename.endswith(".pdf"):
+        return "application/pdf"
+    return "text/plain"

@@ -11,6 +11,8 @@ from right_hire_ui.components.job_picker import job_picker
 from right_hire_ui.components.layout import page_shell
 from right_hire_ui.states.results_state import VERDICT_FILTERS, ResultsState
 
+RESUME_UPLOAD_ID = "candidate_resume_upload"
+
 
 def _verdict_filter_select() -> rx.Component:
     return rx.select.root(
@@ -169,11 +171,104 @@ def _result_content(row: dict) -> rx.Component:
     )
 
 
+def _delete_candidate_dialog(row: dict) -> rx.Component:
+    """Deleting removes the candidate and their evaluation for good — confirm first."""
+    candidate_id = row["candidate_id"].to(str)
+    return rx.alert_dialog.root(
+        rx.alert_dialog.trigger(
+            rx.button(
+                rx.icon("trash-2", size=12),
+                "Delete",
+                size="1",
+                variant="ghost",
+                color_scheme="red",
+            ),
+        ),
+        rx.alert_dialog.content(
+            rx.alert_dialog.title("Delete this candidate?"),
+            rx.alert_dialog.description(
+                f"{row['name'].to(str)} and their evaluation will be permanently removed. "
+                "This can't be undone.",
+            ),
+            rx.flex(
+                rx.alert_dialog.cancel(rx.button("Cancel", variant="soft", color_scheme="gray")),
+                rx.alert_dialog.action(
+                    rx.button(
+                        "Delete",
+                        color_scheme="red",
+                        on_click=ResultsState.delete_candidate(candidate_id),
+                    ),
+                ),
+                spacing="3",
+                justify="end",
+                margin_top="1em",
+            ),
+        ),
+    )
+
+
 def _result_item(row: dict) -> rx.Component:
     return rx.accordion.item(
         header=_result_header(row),
-        content=_result_content(row),
+        content=rx.vstack(
+            _result_content(row),
+            rx.hstack(rx.spacer(), _delete_candidate_dialog(row), width="100%"),
+            spacing="2",
+            width="100%",
+        ),
         value=row["candidate_id"].to(str),
+    )
+
+
+def _attach_resume_block() -> rx.Component:
+    """For candidates whose sheet had no resume_url, or whose link couldn't be fetched —
+    attach the file directly instead. Costs 1 credit, same as a sheet row."""
+    return rx.vstack(
+        rx.text("Attach a resume file", weight="medium", size="2"),
+        rx.text(
+            "Uploads the file for one candidate and re-queues them. Accepts .pdf, .txt, .md.",
+            size="1",
+            color=rx.color("gray", 11),
+        ),
+        rx.hstack(
+            job_picker(
+                ResultsState.candidate_options,
+                ResultsState.resume_target_id,
+                ResultsState.set_resume_target_id,
+                placeholder="Select a candidate...",
+            ),
+            width="100%",
+        ),
+        rx.upload(
+            rx.hstack(
+                rx.icon("file-up", size=18, color=rx.color("gray", 9)),
+                rx.text("Drag & drop, or click to select", size="2"),
+                spacing="2",
+                align="center",
+            ),
+            rx.foreach(
+                rx.selected_files(RESUME_UPLOAD_ID),
+                lambda f: rx.badge(f, variant="soft", color_scheme="violet"),
+            ),
+            id=RESUME_UPLOAD_ID,
+            multiple=False,
+            max_files=1,
+            accept={"application/pdf": [".pdf"], "text/plain": [".txt", ".md"]},
+            border=f"1.5px dashed {rx.color('gray', 7)}",
+            border_radius="var(--radius-4)",
+            padding="1.25em",
+            width="100%",
+        ),
+        rx.button(
+            "Attach & re-queue",
+            on_click=ResultsState.attach_resume(rx.upload_files(upload_id=RESUME_UPLOAD_ID)),
+            loading=ResultsState.is_attaching,
+            size="2",
+            variant="soft",
+            width="fit-content",
+        ),
+        spacing="2",
+        width="100%",
     )
 
 
@@ -198,11 +293,23 @@ def results_page() -> rx.Component:
                         width="100%",
                         spacing="3",
                     ),
-                    rx.button(
-                        "Load Results",
-                        on_click=ResultsState.load_results,
-                        loading=ResultsState.is_loading,
-                        size="3",
+                    rx.hstack(
+                        rx.button(
+                            "Load Results",
+                            on_click=ResultsState.load_results,
+                            loading=ResultsState.is_loading,
+                            size="3",
+                        ),
+                        rx.button(
+                            rx.icon("download", size=14),
+                            "Export CSV",
+                            on_click=ResultsState.export_csv,
+                            loading=ResultsState.is_exporting,
+                            disabled=ResultsState.selected_job_id == "",
+                            size="3",
+                            variant="soft",
+                        ),
+                        spacing="3",
                         width="fit-content",
                     ),
                     rx.cond(
@@ -233,6 +340,8 @@ def results_page() -> rx.Component:
                                     margin_top="0.75em",
                                 ),
                             ),
+                            rx.divider(margin_y="1em"),
+                            _attach_resume_block(),
                         ),
                     ),
                     width="100%",

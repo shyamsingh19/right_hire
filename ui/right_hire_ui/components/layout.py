@@ -35,14 +35,83 @@ def _nav_link(route: str, label: str, icon: str) -> rx.Component:
     )
 
 
+def _credits_block() -> rx.Component:
+    """1 credit = 1 candidate evaluated. Top-ups are approved by a human out-of-band,
+    so this only asks — it never charges (see app/api/billing.py)."""
+    out_of_credits = AppState.credits <= 0
+    return rx.vstack(
+        rx.hstack(
+            rx.icon("coins", size=14, color=rx.color("amber", 9)),
+            rx.text("Credits", size="1", color=rx.color("gray", 11)),
+            rx.spacer(),
+            rx.badge(
+                AppState.credits.to_string(),
+                variant="soft",
+                color_scheme=rx.cond(out_of_credits, "red", "grass"),
+                size="1",
+            ),
+            align="center",
+            width="100%",
+        ),
+        rx.cond(
+            out_of_credits,
+            rx.text(
+                "Out of credits — uploads will be rejected.",
+                size="1",
+                color=rx.color("red", 9),
+            ),
+        ),
+        rx.button(
+            "Request more",
+            on_click=AppState.request_credits,
+            size="1",
+            variant="soft",
+            width="100%",
+        ),
+        rx.cond(
+            AppState.credits_message != "",
+            rx.text(AppState.credits_message, size="1", color=rx.color("gray", 11)),
+        ),
+        rx.cond(
+            AppState.payment_link != "",
+            rx.link(
+                "Open payment page →",
+                href=AppState.payment_link,
+                is_external=True,
+                size="1",
+                color=rx.color("violet", 10),
+            ),
+        ),
+        spacing="2",
+        width="100%",
+    )
+
+
 def _account_widget() -> rx.Component:
     """Every API call needs an X-API-Key — this is the only place a user gets or pastes one."""
-    signed_in = rx.hstack(
-        rx.icon("key-round", size=14, color=rx.color("grass", 9)),
-        rx.text("Connected", size="1", color=rx.color("gray", 11)),
-        rx.spacer(),
-        rx.link("Log out", on_click=AppState.log_out, size="1", color=rx.color("gray", 9)),
-        align="center",
+    signed_in = rx.vstack(
+        rx.hstack(
+            rx.icon("key-round", size=14, color=rx.color("grass", 9)),
+            rx.text("Connected", size="1", color=rx.color("gray", 11)),
+            rx.spacer(),
+            rx.link("Log out", on_click=AppState.log_out, size="1", color=rx.color("gray", 9)),
+            align="center",
+            width="100%",
+        ),
+        _credits_block(),
+        rx.divider(),
+        rx.tooltip(
+            rx.button(
+                rx.icon("refresh-cw", size=12),
+                "Rotate key",
+                on_click=AppState.rotate_key,
+                size="1",
+                variant="ghost",
+                width="100%",
+            ),
+            content="Issues a new key and saves it here. The current key stops working immediately.",
+        ),
+        spacing="2",
         width="100%",
     )
     signed_out = rx.vstack(

@@ -19,6 +19,11 @@ class AppState(rx.State):
     auth_error: str = ""
     is_authenticating: bool = False
 
+    # Billing — 1 credit = 1 candidate evaluated (see app/api/billing.py)
+    credits: int = 0
+    credits_message: str = ""
+    payment_link: str = ""
+
     def set_signup_email(self, value: str) -> None:
         self.signup_email = value
 
@@ -35,6 +40,41 @@ class AppState(rx.State):
     def log_out(self) -> None:
         self.api_key = ""
         self.jobs = []
+        self.credits = 0
+        self.credits_message = ""
+        self.payment_link = ""
+
+    async def rotate_key(self):
+        """Swap in a fresh key. The old one stops working the moment this returns, so the
+        new one is saved to localStorage immediately rather than shown for copying."""
+        if not self.api_key:
+            return
+        try:
+            result = await api_client.rotate_key(self.api_key)
+            self.api_key = result["api_key"]
+            yield rx.toast.success("API key rotated — the previous key no longer works.")
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Could not rotate key: {e}")
+
+    async def load_credits(self) -> None:
+        if not self.api_key:
+            self.credits = 0
+            return
+        try:
+            self.credits = (await api_client.get_credits(self.api_key))["credits"]
+        except (httpx.HTTPError, api_client.ApiError):
+            self.credits = 0
+
+    async def request_credits(self):
+        if not self.api_key:
+            return
+        try:
+            result = await api_client.request_credits(self.api_key)
+            self.credits_message = result.get("message", "")
+            self.payment_link = result.get("payment_link") or ""
+            yield rx.toast.info(self.credits_message)
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(str(e))
 
     async def signup(self):
         self.auth_error = ""
@@ -64,6 +104,11 @@ class AppState(rx.State):
             self.jobs = await api_client.get_jobs(self.api_key)
         except (httpx.HTTPError, api_client.ApiError):
             self.jobs = []
+
+    async def load_page_data(self) -> None:
+        """on_load for every page — the sidebar shows the credit balance everywhere."""
+        await self.load_jobs()
+        await self.load_credits()
 
     @rx.var
     def job_options(self) -> list[tuple[str, str]]:

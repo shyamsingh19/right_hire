@@ -104,12 +104,81 @@ class ResultsState(AppState):
     offset: int = 0
     page_size: int = 50
     has_more: bool = True
+    resume_target_id: str = ""
+    is_exporting: bool = False
+    is_attaching: bool = False
 
     def set_selected_job_id(self, value: str) -> None:
         self.selected_job_id = value
 
     def set_verdict_filter(self, value: str) -> None:
         self.verdict_filter = value
+
+    def set_resume_target_id(self, value: str) -> None:
+        self.resume_target_id = value
+
+    @rx.var
+    def candidate_options(self) -> list[tuple[str, str]]:
+        return [
+            (item["candidate"]["id"], item["candidate"].get("name") or item["candidate"]["id"])
+            for item in self.results
+        ]
+
+    async def export_csv(self):
+        if not self.selected_job_id:
+            return
+        self.is_exporting = True
+        yield
+        try:
+            csv_text = await api_client.export_results_csv(
+                self.api_key, self.selected_job_id, self.verdict_filter
+            )
+            yield rx.download(
+                data=csv_text, filename=f"right_hire_{self.selected_job_id}_results.csv"
+            )
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Export failed: {e}")
+        finally:
+            self.is_exporting = False
+
+    async def delete_candidate(self, candidate_id: str):
+        """Permanently removes the candidate and their evaluation — the UI gates this
+        behind a confirm dialog since it's the GDPR-style deletion path."""
+        if not self.selected_job_id:
+            return
+        try:
+            await api_client.delete_candidate(self.api_key, self.selected_job_id, candidate_id)
+            self.results = [r for r in self.results if r["candidate"]["id"] != candidate_id]
+            self.offset = len(self.results)
+            yield rx.toast.success("Candidate deleted.")
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Delete failed: {e}")
+
+    async def attach_resume(self, files: list[rx.UploadFile]):
+        if not self.selected_job_id or not self.resume_target_id or not files:
+            yield rx.toast.error("Pick a candidate and a file first.")
+            return
+
+        self.is_attaching = True
+        yield
+        try:
+            file = files[0]
+            filename = file.filename or "resume.pdf"
+            data = await file.read()
+            await api_client.upload_resume(
+                self.api_key,
+                self.selected_job_id,
+                self.resume_target_id,
+                filename,
+                data,
+                api_client.infer_resume_content_type(filename),
+            )
+            await self.load_credits()  # attaching a resume costs 1 credit
+            yield rx.toast.success("Resume attached — candidate re-queued for evaluation.")
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(str(e))
+        finally:
+            self.is_attaching = False
 
     async def load_results(self):
         """Fresh load from the top — resets pagination, then kicks off background polling

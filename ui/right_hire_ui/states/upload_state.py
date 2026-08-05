@@ -36,6 +36,11 @@ class UploadState(AppState):
             self.upload_result_message = (
                 f"Enqueued {result['queued_count']} candidates for evaluation."
             )
+            if result.get("failed_count"):
+                self.upload_result_message += (
+                    f" {result['failed_count']} could not be queued — check the queue service."
+                )
+            await self.load_credits()  # each queued candidate costs 1 credit
             yield rx.toast.success(self.upload_result_message)
         except (httpx.HTTPError, api_client.ApiError) as e:
             self.upload_error = str(e)
