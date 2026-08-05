@@ -112,6 +112,13 @@ def client(fake_provider) -> Generator:
     db_module.engine = engine
     try:
         with TestClient(app, raise_server_exceptions=True) as c:
+            # TestClient reuses the same client host across every test in this process,
+            # so the per-IP signup rate limiter (app/api/auth.py) would otherwise trip
+            # partway through the suite. Reset it per test — each test is its own "IP".
+            from app.api.auth import _signup_attempts
+
+            _signup_attempts.clear()
+
             # All routes require an API key — sign up a default user so existing
             # tests that don't care about auth (most of them) work unmodified.
             signup = c.post("/auth/signup", json={"email": "test@example.com"})

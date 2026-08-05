@@ -13,6 +13,7 @@ from app.llm.factory import get_provider
 from app.models import Candidate, CandidateStatus, Evaluation, Job
 from app.pipeline.embed import embed_texts, vec_to_bytes
 from app.pipeline.filters import apply_filters
+from app.pipeline.ingest import fetch_drive_file
 from app.pipeline.judge import judge_candidate
 from app.pipeline.match import match_candidate
 from app.pipeline.parse import extract_text, parse_jd, parse_resume
@@ -31,13 +32,49 @@ def _sync_session() -> tuple[Session, sessionmaker]:
     return factory()
 
 
-def _cache_key(resume_text: str, jd_parsed: dict) -> str:
-    payload = resume_text + json.dumps(jd_parsed, sort_keys=True)
+def _cache_key(resume_text: str, jd_parsed: dict, weights: dict, thresholds: dict) -> str:
+    # Weights/thresholds are part of the key so recalibrating a job's thresholds
+    # (a workflow CLAUDE.md encourages) doesn't serve a stale cached verdict.
+    payload = (
+        resume_text
+        + json.dumps(jd_parsed, sort_keys=True)
+        + json.dumps(weights, sort_keys=True)
+        + json.dumps(thresholds, sort_keys=True)
+    )
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _resolve_resume_text(candidate: Candidate) -> str:
+    """Get resume text for *candidate*, fetching from resume_url if needed.
+
+    Raises if no text can be produced — callers must not silently score an
+    empty resume against a JD (see CLAUDE.md's fastest-path note on this).
+    """
+    if candidate.resume_text:
+        return candidate.resume_text
+    if not candidate.resume_url:
+        raise RuntimeError("Candidate has no resume_text and no resume_url")
+
+    resume_path = candidate.resume_url
+    local_file = Path(resume_path)
+    if not local_file.exists() and resume_path.startswith(("http://", "https://")):
+        ext = Path(resume_path.split("?")[0]).suffix or ".pdf"
+        dest = Path(settings.storage_dir) / f"{candidate.id}{ext}"
+        fetch_drive_file(resume_path, str(dest))
+        local_file = dest
+
+    if not local_file.exists():
+        raise RuntimeError(f"Could not resolve resume file for resume_url={resume_path!r}")
+
+    text = extract_text(str(local_file))
+    if not text.strip():
+        raise RuntimeError(f"Resume file at {local_file} produced no extractable text")
+    return text
 
 
 def _get_redis():
     import redis as redis_lib
+
     return redis_lib.from_url(settings.effective_redis_url, decode_responses=True)
 
 
@@ -60,9 +97,14 @@ def process_candidate(candidate_id: str, job_id: str) -> None:
         weights: dict = job.weights or {}
         thresholds: dict = job.thresholds or {}
 
+        # ── Step 1: Resolve resume text (local file, or fetch from resume_url) ─
+        resume_text = _resolve_resume_text(candidate)
+        if resume_text != candidate.resume_text:
+            candidate.resume_text = resume_text
+            session.commit()
+
         # ── Verdict cache check ───────────────────────────────────────────────
-        resume_text = candidate.resume_text or ""
-        ck = _cache_key(resume_text, jd_parsed_dict)
+        ck = _cache_key(resume_text, jd_parsed_dict, weights, thresholds)
         try:
             r = _get_redis()
             cached = r.get(f"verdict:{ck}")
@@ -72,14 +114,6 @@ def process_candidate(candidate_id: str, job_id: str) -> None:
                 return
         except Exception as exc:
             logger.warning("Redis cache check failed: %s", exc)
-
-        # ── Step 1: Extract text (if we have a file path) ────────────────────
-        if not resume_text and candidate.resume_url:
-            resume_path = candidate.resume_url
-            if Path(resume_path).exists():
-                resume_text = extract_text(resume_path)
-                candidate.resume_text = resume_text
-                session.commit()
 
         # ── Step 2: Parse resume & JD ────────────────────────────────────────
         provider = get_provider()

@@ -139,3 +139,4 @@ class BulkIngestResponse(BaseModel):
     job_id: str
     queued_count: int
     candidate_ids: list[str] = Field(default_factory=list)
+    failed_count: int = 0

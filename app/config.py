@@ -38,12 +38,24 @@ class Settings(BaseSettings):
     upstash_redis_rest_url: str = ""
     upstash_redis_rest_token: str = ""
 
+    # Billing — deliberately manual for MVP (no card data, no webhooks, no payment
+    # provider account on this app): a user requests credits, pays via an external
+    # link the operator sets up, and the operator grants credits by hand once they've
+    # confirmed the payment themselves. See app/api/billing.py.
+    signup_free_credits: int = 3  # trial credits granted on signup, no payment needed
+    payment_link_url: str = ""  # e.g. a Stripe Payment Link / PayPal.me URL, operator's choice
+    admin_api_key: str = ""  # shared secret for POST /billing/admin/grant-credits; unset = disabled
+
     @property
     def effective_redis_url(self) -> str:
         """Return Upstash rediss:// URL when REST credentials are provided, else redis_url."""
         if self.upstash_redis_rest_url and self.upstash_redis_rest_token:
             # REST URL is https://<host>.upstash.io — strip scheme to get hostname
-            host = self.upstash_redis_rest_url.removeprefix("https://").removeprefix("http://").rstrip("/")
+            host = (
+                self.upstash_redis_rest_url.removeprefix("https://")
+                .removeprefix("http://")
+                .rstrip("/")
+            )
             return f"rediss://default:{self.upstash_redis_rest_token}@{host}:6379"
         return self.redis_url
 

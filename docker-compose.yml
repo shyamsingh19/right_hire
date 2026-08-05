@@ -20,10 +20,30 @@ services:
       retries: 5
       start_period: 30s
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   app:
     build: .
     restart: unless-stopped
     env_file: .env
+    # Overrides any UPSTASH_*/REDIS_URL from .env so the container always talks to the
+    # compose-managed redis service by its network name, not localhost or a cloud URL.
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - UPSTASH_REDIS_REST_URL=
+      - UPSTASH_REDIS_REST_TOKEN=
     ports:
       - "8000:8000"
     volumes:
@@ -33,21 +53,29 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
   worker:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - UPSTASH_REDIS_REST_URL=
+      - UPSTASH_REDIS_REST_TOKEN=
     volumes:
       - .:/app
       - storage_data:/app/storage
-    # REDIS_URL is resolved from UPSTASH_REDIS_REST_URL/TOKEN at runtime via app/config.py
     command: >
       sh -c "rq worker --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats"
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   mysql_data:
+  redis_data:
   storage_data:

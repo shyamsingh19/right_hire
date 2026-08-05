@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import csv
+import io
 import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -175,6 +178,51 @@ async def list_results(
         )
 
     return out
+
+
+@router.get("/jobs/{job_id}/results/export")
+async def export_results_csv(
+    job_id: str,
+    verdict: str | None = Query(default=None, description="Filter by verdict: Fit, Maybe, Reject"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """CSV of every candidate + evaluation for a job — for sharing with a hiring manager."""
+    await _get_owned_job(db, job_id, user)
+
+    stmt = select(Candidate).where(Candidate.job_id == job_id)
+    candidates = (await db.execute(stmt)).scalars().all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        ["name", "email", "yoe", "location", "status", "verdict", "score", "model_used"]
+    )
+    for c in candidates:
+        eval_obj: Evaluation | None = (
+            await db.execute(select(Evaluation).where(Evaluation.candidate_id == c.id))
+        ).scalar_one_or_none()
+        if verdict and (not eval_obj or eval_obj.verdict != verdict):
+            continue
+        writer.writerow(
+            [
+                c.name or "",
+                c.email or "",
+                c.yoe if c.yoe is not None else "",
+                c.location or "",
+                c.status,
+                eval_obj.verdict if eval_obj else "",
+                f"{eval_obj.score:.4f}" if eval_obj and eval_obj.score is not None else "",
+                eval_obj.model_used if eval_obj else "",
+            ]
+        )
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="job_{job_id}_results.csv"'},
+    )
 
 
 @router.get("/jobs/{job_id}/stats", response_model=BatchStats)

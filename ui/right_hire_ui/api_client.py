@@ -78,8 +78,12 @@ async def upload_candidates(
         return resp.json()
 
 
-async def get_results(api_key: str, job_id: str, verdict_filter: str) -> list[dict]:
-    params = {} if verdict_filter == "All" else {"verdict": verdict_filter}
+async def get_results(
+    api_key: str, job_id: str, verdict_filter: str, offset: int = 0, limit: int = 50
+) -> list[dict]:
+    params: dict = {"offset": offset, "limit": limit}
+    if verdict_filter != "All":
+        params["verdict"] = verdict_filter
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{API_BASE}/jobs/{job_id}/results",

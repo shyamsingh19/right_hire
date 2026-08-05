@@ -125,3 +125,21 @@ def test_process_candidate_records_failure_without_crashing(sync_factory, monkey
 
 def test_process_candidate_missing_row_is_a_noop(sync_factory):
     tasks_module.process_candidate("nonexistent", "also-nonexistent")  # must not raise
+
+
+def test_process_candidate_fails_loudly_with_no_resume_text_or_url(sync_factory):
+    """Guards the Critical Blocker #1 fix: a candidate with neither resume_text nor a
+    resolvable resume_url must never silently get scored against empty text — it should
+    end up 'failed' with a clear reason instead."""
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, resume_text="")
+
+    tasks_module.process_candidate(candidate_id, job_id)
+
+    session = sync_factory()
+    candidate = session.get(Candidate, candidate_id)
+    assert candidate.status == CandidateStatus.failed
+
+    eval_obj = session.execute(
+        select(Evaluation).where(Evaluation.candidate_id == candidate_id)
+    ).scalar_one()
+    assert "resume" in eval_obj.reasons["error"].lower()

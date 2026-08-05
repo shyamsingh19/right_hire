@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -9,6 +10,10 @@ from right_hire_ui import api_client
 from right_hire_ui.states.app_state import AppState
 
 VERDICT_FILTERS = ["All", "Fit", "Maybe", "Reject"]
+
+_ACTIVE_STATUSES = ("pending", "processing")
+_POLL_INTERVAL_SECONDS = 5
+_POLL_MAX_ITERATIONS = 24  # ~2 minutes, then the user can hit "Load Results" again
 
 
 def _build_row(item: dict) -> dict:
@@ -96,6 +101,9 @@ class ResultsState(AppState):
     is_loading: bool = False
     load_error: str = ""
     has_loaded: bool = False
+    offset: int = 0
+    page_size: int = 50
+    has_more: bool = True
 
     def set_selected_job_id(self, value: str) -> None:
         self.selected_job_id = value
@@ -104,17 +112,26 @@ class ResultsState(AppState):
         self.verdict_filter = value
 
     async def load_results(self):
+        """Fresh load from the top — resets pagination, then kicks off background polling
+        so candidates that are still pending/processing update without a manual refresh
+        (GET /jobs/{id}/results supports offset/limit; this is the page that uses it)."""
         if not self.selected_job_id:
             return
 
+        self.offset = 0
+        self.results = []
+        self.has_more = True
         self.load_error = ""
         self.is_loading = True
         yield
 
         try:
-            self.results = await api_client.get_results(
-                self.api_key, self.selected_job_id, self.verdict_filter
+            page = await api_client.get_results(
+                self.api_key, self.selected_job_id, self.verdict_filter, 0, self.page_size
             )
+            self.results = page
+            self.offset = len(page)
+            self.has_more = len(page) == self.page_size
         except (httpx.HTTPError, api_client.ApiError) as e:
             self.load_error = str(e)
             self.results = []
@@ -122,6 +139,55 @@ class ResultsState(AppState):
         finally:
             self.is_loading = False
             self.has_loaded = True
+
+        yield ResultsState.poll_for_updates
+
+    async def load_more(self):
+        if not self.selected_job_id or not self.has_more:
+            return
+        self.is_loading = True
+        yield
+
+        try:
+            page = await api_client.get_results(
+                self.api_key, self.selected_job_id, self.verdict_filter, self.offset, self.page_size
+            )
+            self.results = self.results + page
+            self.offset += len(page)
+            self.has_more = len(page) == self.page_size
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            self.load_error = str(e)
+            yield rx.toast.error(self.load_error)
+        finally:
+            self.is_loading = False
+
+    @rx.event(background=True)
+    async def poll_for_updates(self):
+        """Re-fetches the currently-loaded window every few seconds while any candidate
+        is still pending/processing, so results show up without the user hitting reload."""
+        for _ in range(_POLL_MAX_ITERATIONS):
+            await asyncio.sleep(_POLL_INTERVAL_SECONDS)
+            async with self:
+                if not self.selected_job_id:
+                    return
+                still_active = any(
+                    row["candidate"]["status"] in _ACTIVE_STATUSES for row in self.results
+                )
+                if not still_active:
+                    return
+                job_id = self.selected_job_id
+                verdict_filter = self.verdict_filter
+                api_key = self.api_key
+                window = max(len(self.results), self.page_size)
+
+            try:
+                page = await api_client.get_results(api_key, job_id, verdict_filter, 0, window)
+            except (httpx.HTTPError, api_client.ApiError):
+                continue
+
+            async with self:
+                self.results = page
+                self.offset = len(page)
 
     @rx.var
     def display_rows(self) -> list[dict[str, Any]]:
