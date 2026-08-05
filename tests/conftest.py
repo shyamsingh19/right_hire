@@ -89,20 +89,16 @@ async def test_db() -> AsyncSession:
 
 @pytest.fixture
 def client(fake_provider) -> Generator:
+    from app import db as db_module
     from app.main import app
     from app.llm.factory import get_provider
 
     app.dependency_overrides[get_provider] = lambda: fake_provider
 
-    # Override DB with SQLite
+    # Override DB with SQLite — swap the module-level engine so the app's own
+    # lifespan (Base.metadata.create_all) runs against the test DB too,
+    # instead of the real DATABASE_URL from settings.
     engine = create_async_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
-
-    async def _create_tables():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-    asyncio.get_event_loop().run_until_complete(_create_tables())
-
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async def _override_db():
@@ -111,7 +107,12 @@ def client(fake_provider) -> Generator:
 
     app.dependency_overrides[get_db] = _override_db
 
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield c
-
-    app.dependency_overrides.clear()
+    original_engine = db_module.engine
+    db_module.engine = engine
+    try:
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c
+    finally:
+        db_module.engine = original_engine
+        app.dependency_overrides.clear()
+        asyncio.run(engine.dispose())

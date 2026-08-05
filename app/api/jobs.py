@@ -42,20 +42,15 @@ async def create_job(body: JobCreate, db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.get("/{job_id}", response_model=JobResponse)
-async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
-    job = await db.get(Job, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
+async def _job_response(db: AsyncSession, job: Job) -> JobResponse:
     candidate_count_result = await db.execute(
-        select(func.count()).where(Candidate.job_id == job_id)
+        select(func.count()).where(Candidate.job_id == job.id)
     )
     candidate_count = candidate_count_result.scalar() or 0
 
     eval_stats_result = await db.execute(
         select(Evaluation.verdict, func.count())
-        .where(Evaluation.job_id == job_id)
+        .where(Evaluation.job_id == job.id)
         .group_by(Evaluation.verdict)
     )
     eval_stats = {row[0]: row[1] for row in eval_stats_result.fetchall()}
@@ -71,3 +66,18 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
         candidate_count=candidate_count,
         eval_stats=eval_stats or None,
     )
+
+
+@router.get("", response_model=list[JobResponse])
+async def list_jobs(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Job).order_by(Job.created_at.desc()))
+    jobs = result.scalars().all()
+    return [await _job_response(db, job) for job in jobs]
+
+
+@router.get("/{job_id}", response_model=JobResponse)
+async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    job = await db.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return await _job_response(db, job)

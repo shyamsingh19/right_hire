@@ -1,6 +1,6 @@
 # Right Hire — ATS Checker
 
-AI-powered resume screening pipeline. Upload an Excel sheet of candidates against a job description, get back Fit / Maybe / Reject verdicts with rubric breakdowns.
+AI-powered resume screening pipeline. Upload an Excel or CSV sheet of candidates against a job description, get back Fit / Maybe / Reject verdicts with rubric breakdowns.
 
 ## Quick start
 
@@ -22,10 +22,33 @@ Switch to cloud LLM at any time — no code change needed:
 LLM_BACKEND=groq GROQ_API_KEY=gsk_... make run
 ```
 
+### Current setup (no Dockerfile / Alembic migration yet)
+
+`app` and `worker` don't have a `Dockerfile` yet, so `docker compose up -d` on its own fails trying to build them. Until that's added, run only the DB/queue containers and everything else on the host:
+
+```bash
+docker compose up -d mysql redis   # skip app/worker — no Dockerfile yet
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+make run                           # FastAPI on :8001 (Makefile port, not :8000)
+make worker                        # separate terminal
+make seed                          # separate terminal — demo job + 5 candidates
+curl http://localhost:8001/jobs/<job_id>/results
+```
+
+Skip `make migrate` too — `alembic.ini` and `alembic/versions/` migrations don't exist yet. Tables are created automatically on startup instead, via `Base.metadata.create_all` in `app/main.py`'s lifespan (dev-only convenience, not used in production).
+
+To point `local` backend at a GPU machine on your network instead of `localhost`, set in `.env`:
+```
+OLLAMA_URL=http://<gpu-host-ip>:11434
+JUDGE_MODEL=<model pulled on that host>
+```
+Embeddings always run locally via `sentence-transformers` (`app/pipeline/embed.py`), regardless of `OLLAMA_URL` — the GPU host is only used for parse/judge calls.
+
 ## Architecture
 
 ```
-Excel + Drive links + JD  →  FastAPI (ingest)  →  Redis queue (RQ)
+Excel/CSV + Drive links + JD  →  FastAPI (ingest)  →  Redis queue (RQ)
                                                         ↓
                               ┌─────────── Worker pipeline ───────────┐
                               │ parse → filter → embed → match → judge │
@@ -61,7 +84,7 @@ Set `LLM_BACKEND` in `.env`:
 |---|---|
 | `POST /jobs` | Create job, parse JD |
 | `GET /jobs/{id}` | Job details + stats |
-| `POST /jobs/{id}/candidates` | Upload Excel, enqueue pipeline |
+| `POST /jobs/{id}/candidates` | Upload Excel or CSV, enqueue pipeline |
 | `GET /jobs/{id}/results` | Paginated results (filter by verdict) |
 | `GET /evaluations/{id}` | Single evaluation detail |
 
@@ -73,7 +96,9 @@ make test-int   # integration only
 make eval       # precision@k against labeled CSV
 ```
 
-## Excel format
+## Excel / CSV format
+
+Same column layout for both — `.xlsx` and `.csv` are parsed with the same header-alias table (`app/pipeline/ingest.py`), so either format can be uploaded via `POST /jobs/{id}/candidates` or the Streamlit "Upload Candidates" page.
 
 | Column | Required |
 |---|---|

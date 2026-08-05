@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import logging
 import os
@@ -67,6 +68,37 @@ def parse_excel(file_bytes: bytes) -> list[dict]:
             result.append(record)
 
     wb.close()
+    return result
+
+
+def parse_csv(file_bytes: bytes) -> list[dict]:
+    """Parse a .csv file and return a list of normalised row dicts.
+
+    Shares `_COL_MAP` / `_normalize_header` with `parse_excel` so both formats
+    accept the same header aliases and produce identical row shapes.
+    """
+    text = file_bytes.decode("utf-8-sig")
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        return []
+
+    headers = [_normalize_header(h) for h in rows[0]]
+
+    result: list[dict] = []
+    for row in rows[1:]:
+        if all(not v.strip() for v in row):
+            continue  # skip blank rows
+        record: dict = {}
+        for header, value in zip(headers, row):
+            if not header:
+                continue
+            value = value.strip()
+            if value:
+                record[header] = value
+        if record:
+            result.append(record)
+
     return result
 
 

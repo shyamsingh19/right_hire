@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import get_db
 from app.models import Candidate, CandidateStatus, Job
-from app.pipeline.ingest import parse_excel
+from app.pipeline.ingest import parse_csv, parse_excel
 from app.schemas import BulkIngestResponse
 
 router = APIRouter(prefix="/jobs", tags=["ingest"])
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def _get_queue() -> Queue:
     r = redis_lib.from_url(settings.redis_url)
-    return Queue("default", connection=r)
+    return Queue("ats", connection=r)
 
 
 @router.post("/{job_id}/candidates", response_model=BulkIngestResponse, status_code=202)
@@ -33,17 +33,22 @@ async def ingest_candidates(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if not file.filename or not file.filename.endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Only .xlsx files are accepted")
+    filename = file.filename or ""
+    if filename.endswith(".xlsx"):
+        parser = parse_excel
+    elif filename.endswith(".csv"):
+        parser = parse_csv
+    else:
+        raise HTTPException(status_code=400, detail="Only .xlsx or .csv files are accepted")
 
     content = await file.read()
     try:
-        rows = parse_excel(content)
+        rows = parser(content)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Failed to parse Excel: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}") from exc
 
     if not rows:
-        raise HTTPException(status_code=422, detail="Excel file contains no data rows")
+        raise HTTPException(status_code=422, detail="File contains no data rows")
 
     queue = _get_queue()
     candidate_ids: list[str] = []

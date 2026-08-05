@@ -1,12 +1,35 @@
 """Streamlit UI for Right Hire ATS Checker."""
 from __future__ import annotations
 
+import configparser
 import os
+from pathlib import Path
 
 import requests
 import streamlit as st
 
-API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+_config = configparser.ConfigParser()
+_config.read(Path(__file__).resolve().parent.parent / "config.ini")
+
+API_BASE = os.getenv("API_BASE") or _config.get("ui", "api_base", fallback="http://localhost:8001")
+
+
+def _fetch_jobs() -> list[dict]:
+    try:
+        resp = requests.get(f"{API_BASE}/jobs", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException:
+        return []
+
+
+def _job_selectbox(jobs: list[dict], key: str) -> str | None:
+    return st.selectbox(
+        "Job",
+        options=[j["id"] for j in jobs],
+        format_func=lambda jid: next((f"{j['title']} — {jid}" for j in jobs if j["id"] == jid), jid),
+        key=key,
+    )
 
 st.set_page_config(page_title="Right Hire", page_icon="", layout="wide")
 st.title("Right Hire — ATS Checker")
@@ -46,16 +69,25 @@ if page == "Create Job":
 elif page == "Upload Candidates":
     st.header("Upload Candidates")
 
-    job_id = st.text_input("Job ID", placeholder="Paste the job ID from Create Job")
-    uploaded = st.file_uploader("Candidate Excel (.xlsx)", type=["xlsx"])
+    jobs = _fetch_jobs()
+    if not jobs:
+        st.warning("No jobs found. Create one on the 'Create Job' page first.")
+        job_id = None
+    else:
+        job_id = _job_selectbox(jobs, key="upload_job_id")
+    uploaded = st.file_uploader("Candidate file (.xlsx or .csv)", type=["xlsx", "csv"])
 
     if st.button("Upload & Enqueue") and job_id and uploaded:
+        content_type = (
+            "text/csv"
+            if uploaded.name.endswith(".csv")
+            else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
         with st.spinner("Uploading..."):
             try:
                 resp = requests.post(
                     f"{API_BASE}/jobs/{job_id}/candidates",
-                    files={"file": (uploaded.name, uploaded.getvalue(),
-                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                    files={"file": (uploaded.name, uploaded.getvalue(), content_type)},
                     timeout=30,
                 )
                 resp.raise_for_status()
@@ -66,7 +98,7 @@ elif page == "Upload Candidates":
 
     st.markdown("---")
     st.markdown("""
-**Expected Excel columns** (case-insensitive):
+**Expected columns** (case-insensitive, .xlsx or .csv):
 
 | Column | Required |
 |---|---|
@@ -81,7 +113,12 @@ elif page == "Upload Candidates":
 elif page == "Results":
     st.header("Evaluation Results")
 
-    job_id = st.text_input("Job ID")
+    jobs = _fetch_jobs()
+    if not jobs:
+        st.warning("No jobs found. Create one on the 'Create Job' page first.")
+        job_id = None
+    else:
+        job_id = _job_selectbox(jobs, key="results_job_id")
     verdict_filter = st.selectbox("Filter by verdict", ["All", "Fit", "Maybe", "Reject"])
 
     if st.button("Load Results") and job_id:
@@ -112,8 +149,9 @@ elif page == "Results":
                 e = item.get("evaluation")
                 verdict = e["verdict"] if e else c["status"]
                 badge = _BADGE.get(verdict, "⚪")
+                score_display = f"{e['score']:.2f}" if e and e.get("score") is not None else "N/A"
 
-                with st.expander(f"{badge} {c['name'] or 'Unknown'} — {verdict} (score: {e['score']:.2f if e and e['score'] else 'N/A'})"):
+                with st.expander(f"{badge} {c['name'] or 'Unknown'} — {verdict} (score: {score_display})"):
                     col1, col2 = st.columns(2)
                     with col1:
                         st.markdown(f"**Email:** {c.get('email', 'N/A')}")
@@ -121,7 +159,11 @@ elif page == "Results":
                         st.markdown(f"**Location:** {c.get('location', 'N/A')}")
                     with col2:
                         if e:
-                            st.markdown(f"**Score:** {e['score']:.3f}" if e.get("score") else "**Score:** N/A")
+                            st.markdown(
+                                f"**Score:** {e['score']:.3f}"
+                                if e.get("score") is not None
+                                else "**Score:** N/A"
+                            )
                             st.markdown(f"**Model:** {e.get('model_used', 'N/A')}")
 
                     if e and e.get("rubric"):

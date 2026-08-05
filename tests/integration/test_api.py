@@ -39,6 +39,20 @@ def test_create_job(client):
     assert data["jd_parsed"] is not None
 
 
+def test_list_jobs(client):
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+    created = client.post("/jobs", json={"title": "Data Engineer", "jd_raw": "Need SQL, Airflow."})
+    job_id = created.json()["id"]
+
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    ids = [j["id"] for j in resp.json()]
+    assert job_id in ids
+
+
 def test_get_job_not_found(client):
     resp = client.get("/jobs/nonexistent-id")
     assert resp.status_code == 404
@@ -71,13 +85,32 @@ def test_ingest_candidates(client):
     assert len(data["candidate_ids"]) == 2
 
 
+def test_ingest_candidates_csv(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+
+    csv_bytes = (
+        b"name,email,yoe,location,resume_url\n"
+        b"Alice,alice@test.com,5,SF,\n"
+        b"Bob,bob@test.com,2,NY,\n"
+    )
+    resp = client.post(
+        f"/jobs/{job_id}/candidates",
+        files={"file": ("candidates.csv", csv_bytes, "text/csv")},
+    )
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["queued_count"] == 2
+    assert len(data["candidate_ids"]) == 2
+
+
 def test_ingest_wrong_file_type(client):
     create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
     job_id = create.json()["id"]
 
     resp = client.post(
         f"/jobs/{job_id}/candidates",
-        files={"file": ("data.csv", b"name,email\nAlice,a@b.com", "text/csv")},
+        files={"file": ("data.txt", b"name,email\nAlice,a@b.com", "text/plain")},
     )
     assert resp.status_code == 400
 
