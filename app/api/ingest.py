@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_queue() -> Queue:
-    r = redis_lib.from_url(settings.redis_url)
+    r = redis_lib.from_url(settings.effective_redis_url)
     return Queue("ats", connection=r)
 
 

@@ -38,8 +38,7 @@ def _cache_key(resume_text: str, jd_parsed: dict) -> str:
 
 def _get_redis():
     import redis as redis_lib
-
-    return redis_lib.from_url(settings.redis_url, decode_responses=True)
+    return redis_lib.from_url(settings.effective_redis_url, decode_responses=True)
 
 
 def process_candidate(candidate_id: str, job_id: str) -> None:

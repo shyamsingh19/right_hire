@@ -20,19 +20,6 @@ services:
       retries: 5
       start_period: 30s
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "6380:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   app:
     build: .
     restart: unless-stopped
@@ -46,8 +33,6 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      redis:
-        condition: service_healthy
 
   worker:
     build: .
@@ -56,14 +41,13 @@ services:
     volumes:
       - .:/app
       - storage_data:/app/storage
-    command: rq worker --url ${REDIS_URL:-redis://redis:6379/0} ats
+    # REDIS_URL is resolved from UPSTASH_REDIS_REST_URL/TOKEN at runtime via app/config.py
+    command: >
+      sh -c "rq worker --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats"
     depends_on:
       mysql:
-        condition: service_healthy
-      redis:
         condition: service_healthy
 
 volumes:
   mysql_data:
-  redis_data:
   storage_data:

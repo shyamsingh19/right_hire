@@ -7,7 +7,7 @@ ui:
 	cd ui && reflex run
 
 worker:
-	rq worker --url $${REDIS_URL:-redis://localhost:6379/0} ats
+	rq worker --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats
 
 migrate:
 	alembic upgrade head
