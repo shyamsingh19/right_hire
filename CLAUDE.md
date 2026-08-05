@@ -2,21 +2,26 @@
 
 ## What this project is
 
-AI-powered resume screening pipeline. Candidates are ingested from Excel, evaluated through a 7-stage pipeline (parse → filter → embed → match → judge → score), and stored with a Fit / Maybe / Reject verdict. The LLM backend is swappable via one env var with no code changes.
+AI-powered resume screening pipeline. Candidates are ingested from Excel or CSV, evaluated through a 7-stage pipeline (parse → filter → embed → match → judge → score), and stored with a Fit / Maybe / Reject verdict. The LLM backend is swappable via one env var with no code changes.
 
 ---
 
 ## Setup
 
+There's no `Dockerfile` for `app`/`worker` yet and no `alembic.ini`, so `docker compose up -d` on its own and `make migrate` both fail. Run infra only in Docker, everything else on the host:
+
 ```bash
 cp .env.example .env          # set DB creds, LLM_BACKEND, OLLAMA_URL
-docker compose up -d          # MySQL 8 on :3306, Redis 7 on :6379
-make migrate                  # alembic upgrade head (must run before first start)
+docker compose up -d mysql redis   # skip app/worker — no Dockerfile yet
+                               # ports remapped to :3307 (MySQL) / :6380 (Redis)
+                               # on boxes where native mysql/redis-server already own 3306/6379
 pip install -e ".[dev]"
-make run                      # FastAPI on :8000
+make run                      # FastAPI on :8001 (Makefile hardcodes this port, not :8000)
 make worker                   # RQ worker — separate terminal
-streamlit run ui/app.py       # optional UI on :8501
+streamlit run ui/app.py       # optional UI on :8501 — reads config.ini [ui] api_base
 ```
+
+Skip `make migrate` — tables are created automatically via `Base.metadata.create_all` in `app/main.py`'s lifespan (dev-only convenience) until Alembic is wired up.
 
 Switch LLM backend (no code change):
 ```bash
@@ -24,15 +29,17 @@ LLM_BACKEND=groq GROQ_API_KEY=gsk_... make run
 LLM_BACKEND=openai OPENAI_API_KEY=sk-... make run
 ```
 
+See [TESTING_GUIDE.md](TESTING_GUIDE.md) for a full end-to-end run (1 job + 15 varied candidates) against either a local GPU Ollama box or a cloud backend, via `scripts/seed_batch_test.py`.
+
 ---
 
 ## Common commands
 
 | Command | What it does |
 |---|---|
-| `make run` | `uvicorn app.main:app --reload` on :8000 |
+| `make run` | `uvicorn app.main:app --reload` on :8001 |
 | `make worker` | `rq worker` consuming queue `ats` |
-| `make migrate` | `alembic upgrade head` |
+| `make migrate` | `alembic upgrade head` (not yet wired — see TODOs) |
 | `make seed` | Load demo job + 5 candidates, enqueue them |
 | `make test` | Unit tests only (`tests/unit/`), no external deps |
 | `make test-int` | Integration tests, skips `@pytest.mark.local` |
@@ -44,7 +51,7 @@ LLM_BACKEND=openai OPENAI_API_KEY=sk-... make run
 ## Architecture
 
 ```
-POST /jobs/{id}/candidates (Excel)
+POST /jobs/{id}/candidates (Excel or CSV)
         ↓
   FastAPI (async)  →  MySQL (candidates, jobs)
         ↓  enqueue
@@ -59,6 +66,8 @@ POST /jobs/{id}/candidates (Excel)
 ```
 
 **Key constraint:** FastAPI routes are `async`; RQ tasks are synchronous. Workers use a sync SQLAlchemy engine (`create_engine`), not the async one.
+
+`GET /jobs` lists all jobs (used by the UI's job pickers); `GET /jobs/{id}` returns one. Both share `_job_response()` in `app/api/jobs.py` — add new response fields there, not in each route.
 
 ---
 
@@ -85,9 +94,12 @@ tests/
   integration/     # test_pipeline.py (no network), test_api.py (TestClient)
   fixtures/        # sample_jd.json, sample_resumes/
 scripts/
-  seed_demo.py     # creates demo job + candidates in DB
-  eval_harness.py  # precision@k evaluation
-ui/app.py          # Streamlit 3-page app
+  seed_demo.py       # creates demo job + 5 candidates in DB
+  seed_batch_test.py # 1 job + 15 varied candidates for manual pipeline/LLM testing
+  eval_harness.py    # precision@k evaluation
+ui/app.py            # Streamlit 3-page app — job pickers backed by GET /jobs
+config.ini           # [ui] api_base — UI falls back to this if API_BASE env var unset
+TESTING_GUIDE.md      # manual end-to-end run against local GPU or cloud LLM backends
 ```
 
 ---
@@ -227,12 +239,16 @@ def test_something(fake_provider):
 
 `config.py` auto-derives `async_database_url` by replacing `pymysql` → `aiomysql` (or `sqlite` → `aiosqlite` for tests).
 
+The Streamlit UI is not configured through these — it reads `API_BASE` env var, falling back to `[ui] api_base` in `config.ini` (default `http://localhost:8001`).
+
 ---
 
 ## TODOs / known gaps
 
 - `TODO`: No Dockerfile yet — `docker compose up` will fail for the `app` and `worker` services until a `Dockerfile` is added.
-- `TODO`: `make worker` uses queue name `ats` but `make lint` / CI workflow not yet defined.
+- `TODO`: `make lint` / CI workflow not yet defined.
 - `TODO`: `eval_harness.py` expects a labeled CSV (`candidate_id,expected_verdict`) — no sample provided.
-- `TODO`: Alembic `alembic.ini` not yet present — needed for `make migrate` to work.
+- `TODO`: Alembic `alembic.ini` not yet present — needed for `make migrate` to work. Tables are created ad hoc via `Base.metadata.create_all` in `app/main.py` lifespan instead.
 - `TODO`: `GroqProvider.embed()` always raises `NotImplementedError`; embeddings always fall back to the local SentenceTransformer. Document this if Groq is the primary backend.
+- `docker-compose.yml` maps MySQL/Redis to host ports `3307`/`6380` (not the `3306`/`6379` defaults in `config.py`) to avoid clashing with native `mysql`/`redis-server` services on dev machines — set `DATABASE_URL`/`REDIS_URL` in `.env` accordingly when running against this compose file.
+- The RQ queue name was previously inconsistent (`ingest.py` enqueued to `"default"` while `make worker` and `seed_demo.py` used `"ats"`, so candidates silently never got processed). Now fixed — everything enqueues to and consumes `"ats"`. If you add a new enqueue call, use `"ats"`, not `"default"`.
