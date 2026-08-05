@@ -95,8 +95,12 @@ class LocalProvider(LLMProvider):
                 if attempt < _MAX_RETRIES:
                     time.sleep(_BACKOFF_BASE**attempt)
 
+        # Name the underlying cause in the message itself, not just the __cause__ chain:
+        # workers persist str(exc), so a bare "failed after N attempts" reaches the operator
+        # with the actual reason (timeout? bad JSON? model unloaded?) already discarded.
         raise RuntimeError(
-            f"LocalProvider.complete_json failed after {_MAX_RETRIES} attempts"
+            f"LocalProvider.complete_json failed after {_MAX_RETRIES} attempts "
+            f"[{self.model} @ {self.base_url}] — {type(last_exc).__name__}: {last_exc}"
         ) from last_exc
 
     # ── embed ────────────────────────────────────────────────────────────────
@@ -131,7 +135,9 @@ class LocalProvider(LLMProvider):
                             time.sleep(_BACKOFF_BASE**attempt)
                 else:
                     raise RuntimeError(
-                        f"LocalProvider.embed failed after {_MAX_RETRIES} attempts"
+                        f"LocalProvider.embed failed after {_MAX_RETRIES} attempts "
+                        f"[{embed_model} @ {self.base_url}] — "
+                        f"{type(last_exc).__name__}: {last_exc}"
                     ) from last_exc
 
         return results

@@ -50,13 +50,25 @@ def _friendly_error(raw: str | None) -> str:
             "The resume link couldn't be opened. It may be private, expired, or not a "
             "direct file link. Attach the resume file below instead."
         )
-    if "no extractable text" in lowered:
+    if "no extractable text" in lowered or "too little text" in lowered:
         return (
-            "The resume file was downloaded but no text could be read from it — it may "
-            "be a scanned image or an unsupported format. Try a text-based PDF."
+            "The resume file was downloaded but too little text could be read from it — it "
+            "may be a scanned image or an unsupported format. Try a text-based PDF."
+        )
+    if "too short to evaluate" in lowered:
+        return (
+            "This candidate's resume is too short to assess. Attach the full resume file "
+            "below and re-queue them."
         )
     if "failed to queue" in lowered:
         return "This candidate was never queued for processing. Re-queue them to try again."
+    if "complete_json failed" in lowered or "embed failed" in lowered:
+        # Infrastructure, not the candidate — say so, and keep the technical detail for
+        # whoever has to fix it rather than hiding it behind a vague message.
+        return (
+            "The AI model couldn't complete this evaluation — this is a system issue, not "
+            f"a reflection of the candidate. Re-queue them to retry. Details: {text}"
+        )
     return f"Processing failed: {text}"
 
 

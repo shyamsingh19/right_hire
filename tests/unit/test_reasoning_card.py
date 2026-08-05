@@ -53,6 +53,19 @@ def test_friendly_error_explains_each_known_failure():
     assert "Re-queue" in _friendly_error("Failed to queue for processing")
 
 
+def test_llm_failure_is_blamed_on_the_system_not_the_candidate():
+    """An infrastructure failure must never read as a judgement on the person, but the
+    technical detail still has to reach whoever fixes it."""
+    raw = (
+        "LocalProvider.complete_json failed after 3 attempts [qwen2.5:7b @ "
+        "http://192.168.75.107:11434] — ReadTimeout: timed out"
+    )
+    msg = _friendly_error(raw)
+    assert "system issue, not a reflection of the candidate" in msg
+    assert "ReadTimeout" in msg  # the cause survives all the way to the screen
+    assert "Re-queue" in msg
+
+
 def test_friendly_error_never_returns_empty_for_missing_reason():
     assert _friendly_error(None)
     assert _friendly_error("")

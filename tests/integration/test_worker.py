@@ -40,6 +40,15 @@ def sync_factory(monkeypatch, tmp_path, fake_provider):
     return factory
 
 
+# Long enough to clear _MIN_RESUME_CHARS — anything shorter is rejected as unparseable
+# on purpose, so fixtures have to look like real resumes rather than one-liners.
+_RESUME = (
+    "Senior engineer with 5 years building APIs in Python, PostgreSQL, and Docker. "
+    "Led the migration of a monolith to containerised services and owned the on-call "
+    "rotation for the payments team."
+)
+
+
 def _seed_job_and_candidate(factory, resume_text: str) -> tuple[str, str]:
     session = factory()
     user = User(email="worker@test.com", api_key_hash="0" * 64)
@@ -57,10 +66,7 @@ def _seed_job_and_candidate(factory, resume_text: str) -> tuple[str, str]:
 
 
 def test_process_candidate_happy_path(sync_factory):
-    candidate_id, job_id = _seed_job_and_candidate(
-        sync_factory,
-        "Senior engineer with 5 years building APIs in Python, PostgreSQL, and Docker.",
-    )
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
 
     tasks_module.process_candidate(candidate_id, job_id)
 
@@ -79,7 +85,7 @@ def test_process_candidate_filter_rejection(sync_factory):
     # FakeLLMProvider's canned JD requires 4+ years; this resume has 0 — hard filter should reject
     # before any embed/judge call.
     candidate_id, job_id = _seed_job_and_candidate(
-        sync_factory, "Intern, no professional experience."
+        sync_factory, "Intern, no professional experience. " + _RESUME
     )
     session = sync_factory()
     candidate = session.get(Candidate, candidate_id)
@@ -106,7 +112,7 @@ def test_process_candidate_filter_rejection(sync_factory):
 def test_process_candidate_records_failure_without_crashing(sync_factory, monkeypatch):
     """A mid-pipeline exception must mark the candidate failed with a reason, not raise —
     and must not hit the UnboundLocalError this test guards against."""
-    candidate_id, job_id = _seed_job_and_candidate(sync_factory, "Some resume text.")
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
     monkeypatch.setattr(
         tasks_module, "embed_texts", lambda texts: (_ for _ in ()).throw(RuntimeError("boom"))
     )
@@ -130,7 +136,7 @@ def test_process_candidate_missing_row_is_a_noop(sync_factory):
 def test_process_candidate_backfills_missing_yoe_and_location(sync_factory):
     """A sheet with only name+email must not leave the results table showing N/A —
     the parsed resume fills the gaps (FakeLLMProvider returns yoe=5.0, San Francisco)."""
-    candidate_id, job_id = _seed_job_and_candidate(sync_factory, "5 years of Python and Docker.")
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
 
     tasks_module.process_candidate(candidate_id, job_id)
 
@@ -141,7 +147,7 @@ def test_process_candidate_backfills_missing_yoe_and_location(sync_factory):
 
 
 def test_process_candidate_does_not_overwrite_sheet_provided_values(sync_factory):
-    candidate_id, job_id = _seed_job_and_candidate(sync_factory, "5 years of Python and Docker.")
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
     session = sync_factory()
     candidate = session.get(Candidate, candidate_id)
     candidate.yoe = 9.0
@@ -154,6 +160,22 @@ def test_process_candidate_does_not_overwrite_sheet_provided_values(sync_factory
     candidate = session.get(Candidate, candidate_id)
     assert candidate.yoe == 9.0
     assert candidate.location == "Berlin"
+
+
+def test_process_candidate_refuses_near_empty_resume(sync_factory):
+    """Given near-empty input the LLM invents a plausible candidate rather than
+    returning empty fields, so too-short resumes must fail instead of being parsed."""
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, "Resume")
+
+    tasks_module.process_candidate(candidate_id, job_id)
+
+    session = sync_factory()
+    assert session.get(Candidate, candidate_id).status == CandidateStatus.failed
+    eval_obj = session.execute(
+        select(Evaluation).where(Evaluation.candidate_id == candidate_id)
+    ).scalar_one()
+    assert "too short" in eval_obj.reasons["error"].lower()
+    assert eval_obj.verdict is None  # never a merit-based rejection
 
 
 def test_process_candidate_fails_loudly_with_no_resume_text_or_url(sync_factory):

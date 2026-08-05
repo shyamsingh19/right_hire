@@ -44,15 +44,26 @@ def _cache_key(resume_text: str, jd_parsed: dict, weights: dict, thresholds: dic
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+# Below this, there isn't enough text for the LLM to parse — and given near-empty input it
+# does not return empty fields, it *invents* a plausible candidate (verified: an empty
+# resume yields yoe=7.5 and a full skills list). Failing here is the only safe option.
+_MIN_RESUME_CHARS = 100
+
+
 def _resolve_resume_text(candidate: Candidate) -> str:
     """Get resume text for *candidate*, fetching from resume_url if needed.
 
-    Raises if no text can be produced — callers must not silently score an
+    Raises if no usable text can be produced — callers must not silently score an
     empty resume against a JD (see CLAUDE.md's fastest-path note on this).
     """
-    if candidate.resume_text:
+    if candidate.resume_text and len(candidate.resume_text.strip()) >= _MIN_RESUME_CHARS:
         return candidate.resume_text
     if not candidate.resume_url:
+        if candidate.resume_text:
+            raise RuntimeError(
+                f"Resume text is too short to evaluate "
+                f"({len(candidate.resume_text.strip())} chars, minimum {_MIN_RESUME_CHARS})"
+            )
         raise RuntimeError("Candidate has no resume_text and no resume_url")
 
     resume_path = candidate.resume_url
@@ -67,8 +78,11 @@ def _resolve_resume_text(candidate: Candidate) -> str:
         raise RuntimeError(f"Could not resolve resume file for resume_url={resume_path!r}")
 
     text = extract_text(str(local_file))
-    if not text.strip():
-        raise RuntimeError(f"Resume file at {local_file} produced no extractable text")
+    if len(text.strip()) < _MIN_RESUME_CHARS:
+        raise RuntimeError(
+            f"Resume file at {local_file} produced too little text to evaluate "
+            f"({len(text.strip())} chars, minimum {_MIN_RESUME_CHARS})"
+        )
     return text
 
 
