@@ -166,6 +166,20 @@ Each stage is a pure function in its own file. The RQ task in `workers/tasks.py`
 Default weights: `{skill_overlap: 0.30, cosine: 0.20, judge: 0.50}`. Configurable per-job via `jobs.weights`.
 Default thresholds: `{fit: 0.70, maybe: 0.40}`. Configurable per-job via `jobs.thresholds`.
 
+> **⚖️ Score = Weighted Composite, Not Similarity**
+> The final score must reflect four separate signals — skills match, experience level, tenure
+> relevance, and role title trajectory — each with its own weight. Do **not** collapse these into
+> a single semantic similarity between resume text and JD text. Cosine similarity is one input
+> (`weight: 0.20`), not the answer; it is trivially gameable by keyword stuffing. The judge LLM
+> rubric (`weight: 0.50`) exists precisely to catch what embedding distance misses.
+
+> **📊 Normalize Per Batch, Not Globally**
+> A score of `0.67` is meaningless in isolation. Scores only have interpretive value relative to
+> the current candidate pool. The `fit` / `maybe` thresholds (`0.70` / `0.40`) are starting
+> defaults, not universal constants — they should be calibrated against the score distribution
+> histogram of each batch. When building eval tooling or UI, always show the distribution
+> alongside individual scores; never surface a verdict without its peer context.
+
 ---
 
 ## Prompt system
