@@ -1,15 +1,28 @@
-import pytest
 from app.pipeline.filters import apply_filters
 from app.schemas import ParsedJD, ParsedResume
 
 
 def _resume(**kwargs) -> ParsedResume:
-    defaults = dict(name="Alice", email="a@b.com", yoe=5.0, location="SF", skills=["Python", "Docker"], bullets=[])
+    defaults = dict(
+        name="Alice",
+        email="a@b.com",
+        yoe=5.0,
+        location="SF",
+        skills=["Python", "Docker"],
+        bullets=[],
+    )
     return ParsedResume(**{**defaults, **kwargs})
 
 
 def _jd(**kwargs) -> ParsedJD:
-    defaults = dict(title="Eng", required_skills=["Python"], preferred_skills=[], min_yoe=3.0, location="SF", must_haves=[])
+    defaults = dict(
+        title="Eng",
+        required_skills=["Python"],
+        preferred_skills=[],
+        min_yoe=3.0,
+        location="SF",
+        must_haves=[],
+    )
     return ParsedJD(**{**defaults, **kwargs})
 
 
@@ -41,7 +54,9 @@ def test_location_strict_mismatch():
 
 def test_location_strict_match():
     jd = _jd(location="San Francisco")
-    passed, reason = apply_filters(_resume(location="San Francisco, CA"), jd, {"location_strict": True})
+    passed, reason = apply_filters(
+        _resume(location="San Francisco, CA"), jd, {"location_strict": True}
+    )
     assert passed is True
 
 

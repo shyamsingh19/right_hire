@@ -21,6 +21,9 @@ build/
 # Local storage (resume files)
 storage/
 
+# Scraped/collected candidate data — may contain real PII, never commit
+output/
+
 # Database
 *.db
 *.sqlite3

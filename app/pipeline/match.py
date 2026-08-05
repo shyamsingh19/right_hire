@@ -53,9 +53,7 @@ def match_candidate(
     """Compute all match signals between a candidate and a JD."""
     all_jd_skills = parsed_jd.required_skills + parsed_jd.preferred_skills
 
-    skill_overlap = compute_skill_overlap(
-        parsed_resume.skills, all_jd_skills, canonicalize_fn
-    )
+    skill_overlap = compute_skill_overlap(parsed_resume.skills, all_jd_skills, canonicalize_fn)
     cosine_sim = compute_cosine(candidate_embedding, jd_embedding)
 
     # Which JD skills did the candidate match?
@@ -65,10 +63,7 @@ def match_candidate(
         return s.lower().strip()
 
     cand_set = {_canon(s) for s in parsed_resume.skills}
-    matched_skills = [
-        skill for skill in all_jd_skills
-        if _canon(skill) in cand_set
-    ]
+    matched_skills = [skill for skill in all_jd_skills if _canon(skill) in cand_set]
 
     # Match bullets by simple keyword presence of matched skills
     matched_bullets: list[str] = []

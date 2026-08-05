@@ -39,8 +39,7 @@ class LocalProvider(LLMProvider):
         )
         schema_hint = json.dumps(schema.model_json_schema(), indent=2)
         full_prompt = (
-            f"{prompt}\n\n"
-            f"Your response MUST be valid JSON matching this schema:\n{schema_hint}"
+            f"{prompt}\n\nYour response MUST be valid JSON matching this schema:\n{schema_hint}"
         )
 
         payload = {
@@ -76,7 +75,7 @@ class LocalProvider(LLMProvider):
                     exc,
                 )
                 if attempt < _MAX_RETRIES:
-                    time.sleep(_BACKOFF_BASE ** attempt)
+                    time.sleep(_BACKOFF_BASE**attempt)
 
         raise RuntimeError(
             f"LocalProvider.complete_json failed after {_MAX_RETRIES} attempts"
@@ -111,7 +110,7 @@ class LocalProvider(LLMProvider):
                             exc,
                         )
                         if attempt < _MAX_RETRIES:
-                            time.sleep(_BACKOFF_BASE ** attempt)
+                            time.sleep(_BACKOFF_BASE**attempt)
                 else:
                     raise RuntimeError(
                         f"LocalProvider.embed failed after {_MAX_RETRIES} attempts"

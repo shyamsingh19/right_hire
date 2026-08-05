@@ -4,17 +4,43 @@ AI-powered resume screening pipeline. Upload an Excel or CSV sheet of candidates
 
 ## Quick start
 
+Everything on the host (recommended for local dev — lets `local` backend reach an Ollama
+instance on `localhost` or a GPU box on your LAN):
+
 ```bash
-cp .env.example .env          # edit DB creds and LLM settings
-ollama pull qwen3:8b          # judge model
-ollama pull bge-m3            # embeddings (or any embed model)
-docker compose up -d          # starts MySQL + Redis
-make migrate                  # runs alembic upgrade head
-make seed                     # loads demo job + 5 candidates
-make run                      # FastAPI on :8000
-make worker                   # RQ worker (separate terminal)
-make ui                       # optional UI on :3000 (Reflex dev server)
+cp .env.example .env               # edit DB creds and LLM settings
+ollama pull qwen2.5:7b             # judge model
+ollama pull bge-m3                 # embeddings (or any embed model)
+docker compose up -d mysql redis   # DB + queue only — ports remapped to :3307 / :6380
+pip install -e ".[dev]"
+make migrate                       # alembic upgrade head — creates the schema
+make seed                          # loads demo job + 5 candidates (creates a demo user too)
+make run                           # FastAPI on :8001
+make worker                        # RQ worker — separate terminal
+make ui                            # optional UI on :3000 (Reflex dev server)
 ```
+
+Or fully containerized (`app`/`worker` now have a `Dockerfile`):
+
+```bash
+cp .env.example .env
+# set DATABASE_URL / REDIS_URL to the in-network hostnames docker-compose.yml expects:
+#   mysql+pymysql://ats:ats@mysql:3306/ats   and   redis://redis:6379/0
+docker compose up -d
+docker compose exec app alembic upgrade head
+```
+
+Every route requires an API key — multi-user, no passwords, just a bearer-style header:
+
+```bash
+curl -X POST localhost:8001/auth/signup -d '{"email":"you@example.com"}' -H 'content-type: application/json'
+# → {"user_id": "...", "email": "...", "api_key": "rh_..."}  — shown once, save it
+
+curl localhost:8001/jobs -H 'X-API-Key: rh_...'
+```
+
+The UI has a "Sign up" box in the sidebar that does this for you and remembers the key in
+the browser's localStorage.
 
 Switch to cloud LLM at any time — no code change needed:
 
@@ -22,21 +48,9 @@ Switch to cloud LLM at any time — no code change needed:
 LLM_BACKEND=groq GROQ_API_KEY=gsk_... make run
 ```
 
-### Current setup (no Dockerfile / Alembic migration yet)
-
-`app` and `worker` don't have a `Dockerfile` yet, so `docker compose up -d` on its own fails trying to build them. Until that's added, run only the DB/queue containers and everything else on the host:
-
-```bash
-docker compose up -d mysql redis   # skip app/worker — no Dockerfile yet
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-make run                           # FastAPI on :8001 (Makefile port, not :8000)
-make worker                        # separate terminal
-make seed                          # separate terminal — demo job + 5 candidates
-curl http://localhost:8001/jobs/<job_id>/results
-```
-
-Skip `make migrate` too — `alembic.ini` and `alembic/versions/` migrations don't exist yet. Tables are created automatically on startup instead, via `Base.metadata.create_all` in `app/main.py`'s lifespan (dev-only convenience, not used in production).
+Tables are also auto-created on startup (`Base.metadata.create_all` in `app/main.py`'s
+lifespan) as a zero-friction dev convenience — `make migrate` is what a real deployment
+should rely on instead. Set `AUTO_CREATE_TABLES=false` once Alembic owns your schema.
 
 To point `local` backend at a GPU machine on your network instead of `localhost`, set in `.env`:
 ```
@@ -80,12 +94,18 @@ Set `LLM_BACKEND` in `.env`:
 
 ## API
 
+All endpoints below except `/auth/signup` and `/health` require an `X-API-Key` header.
+Jobs are scoped per user — you'll only ever see your own.
+
 | Endpoint | Description |
 |---|---|
+| `POST /auth/signup` | Create a user, get back an API key (shown once) |
 | `POST /jobs` | Create job, parse JD |
+| `GET /jobs` | List your jobs |
 | `GET /jobs/{id}` | Job details + stats |
 | `POST /jobs/{id}/candidates` | Upload Excel or CSV, enqueue pipeline |
 | `GET /jobs/{id}/results` | Paginated results (filter by verdict) |
+| `GET /jobs/{id}/stats` | Score distribution, verdict counts, suggested thresholds |
 | `GET /evaluations/{id}` | Single evaluation detail |
 
 ## Testing

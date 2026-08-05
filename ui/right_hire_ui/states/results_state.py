@@ -38,17 +38,23 @@ def _build_row(item: dict) -> dict:
     breakdown: dict = (rc.get("score_breakdown") or {}) if rc else {}
     breakdown_rows: list[dict] = []
     if breakdown:
-        labels = {"skill_overlap": "Skill overlap", "cosine_sim": "Semantic similarity", "judge_score": "LLM judge"}
+        labels = {
+            "skill_overlap": "Skill overlap",
+            "cosine_sim": "Semantic similarity",
+            "judge_score": "LLM judge",
+        }
         weights = breakdown.get("weights", {})
         contribs = breakdown.get("contributions", {})
         for key, label in labels.items():
             raw_key = key.replace("_score", "").replace("cosine_sim", "cosine")
-            breakdown_rows.append({
-                "signal": label,
-                "raw": f"{breakdown.get(key, 0):.2f}",
-                "weight": f"{weights.get(raw_key, weights.get(key, 0)):.0%}",
-                "contribution": f"{contribs.get(raw_key, contribs.get(key, 0)):.2f}",
-            })
+            breakdown_rows.append(
+                {
+                    "signal": label,
+                    "raw": f"{breakdown.get(key, 0):.2f}",
+                    "weight": f"{weights.get(raw_key, weights.get(key, 0)):.0%}",
+                    "contribution": f"{contribs.get(raw_key, contribs.get(key, 0)):.2f}",
+                }
+            )
 
     # Per-criterion rubric rows
     rubric_rows: list[dict] = []
@@ -56,11 +62,13 @@ def _build_row(item: dict) -> dict:
         criterion_reasons = (rc.get("criterion_reasons") or {}) if rc else {}
         reasons = e.get("reasons") or {}
         for criterion, crit_score in e["rubric"].items():
-            rubric_rows.append({
-                "criterion": criterion,
-                "score": f"{crit_score:.2f}",
-                "reason": criterion_reasons.get(criterion) or reasons.get(criterion, ""),
-            })
+            rubric_rows.append(
+                {
+                    "criterion": criterion,
+                    "score": f"{crit_score:.2f}",
+                    "reason": criterion_reasons.get(criterion) or reasons.get(criterion, ""),
+                }
+            )
 
     return {
         "candidate_id": c["id"],
@@ -104,9 +112,11 @@ class ResultsState(AppState):
         yield
 
         try:
-            self.results = await api_client.get_results(self.selected_job_id, self.verdict_filter)
-        except httpx.HTTPError as e:
-            self.load_error = f"API error: {e}"
+            self.results = await api_client.get_results(
+                self.api_key, self.selected_job_id, self.verdict_filter
+            )
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            self.load_error = str(e)
             self.results = []
             yield rx.toast.error(self.load_error)
         finally:

@@ -27,6 +27,4 @@ def get_provider() -> LLMProvider:
 
         return OpenAIProvider()
 
-    raise ValueError(
-        f"Unknown LLM_BACKEND={backend!r}. Choose one of: local, groq, openai"
-    )
+    raise ValueError(f"Unknown LLM_BACKEND={backend!r}. Choose one of: local, groq, openai")

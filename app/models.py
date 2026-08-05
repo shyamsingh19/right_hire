@@ -38,10 +38,22 @@ class Verdict(str, PyEnum):
     Reject = "Reject"
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    api_key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     jd_raw: Mapped[str] = mapped_column(Text, nullable=False)
     jd_parsed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -71,7 +83,9 @@ class Candidate(Base):
     resume_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     resume_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    embedding: Mapped[bytes | None] = mapped_column(LargeBinary().with_variant(LONGBLOB, "mysql"), nullable=True)
+    embedding: Mapped[bytes | None] = mapped_column(
+        LargeBinary().with_variant(LONGBLOB, "mysql"), nullable=True
+    )
     status: Mapped[str] = mapped_column(
         Enum(CandidateStatus),
         default=CandidateStatus.pending,
@@ -97,9 +111,7 @@ class Evaluation(Base):
     job_id: Mapped[str] = mapped_column(String(36), ForeignKey("jobs.id"), nullable=False)
     rubric: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    verdict: Mapped[str | None] = mapped_column(
-        Enum(Verdict), nullable=True
-    )
+    verdict: Mapped[str | None] = mapped_column(Enum(Verdict), nullable=True)
     reasons: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     model_used: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cache_key: Mapped[str | None] = mapped_column(String(64), nullable=True)

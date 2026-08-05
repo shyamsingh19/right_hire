@@ -4,6 +4,7 @@
 CSV format: candidate_id,expected_verdict
 Verdicts: Fit, Maybe, Reject
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,8 +25,9 @@ async def _load_evaluations(candidate_ids: list[str]) -> dict[str, str]:
 
     async with factory() as session:
         result = await session.execute(
-            select(Evaluation.candidate_id, Evaluation.verdict)
-            .where(Evaluation.candidate_id.in_(candidate_ids))
+            select(Evaluation.candidate_id, Evaluation.verdict).where(
+                Evaluation.candidate_id.in_(candidate_ids)
+            )
         )
         rows = result.fetchall()
 

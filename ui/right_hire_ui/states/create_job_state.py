@@ -41,6 +41,9 @@ class CreateJobState(AppState):
 
     async def submit(self):
         self.error_message = ""
+        if not self.api_key:
+            self.error_message = "Sign up for an API key first (see the sidebar)."
+            return
         if not self.title or not self.jd_raw:
             self.error_message = "Title and job description are required."
             return
@@ -55,13 +58,13 @@ class CreateJobState(AppState):
 
         try:
             job = await api_client.create_job(
-                self.title, self.jd_raw, self.fit_threshold, self.maybe_threshold
+                self.api_key, self.title, self.jd_raw, self.fit_threshold, self.maybe_threshold
             )
             self.created_job_id = job["id"]
             self.created_job_jd_parsed = job.get("jd_parsed") or {}
             yield rx.toast.success(f"Job created! ID: {job['id']}")
-        except httpx.HTTPError as e:
-            self.error_message = f"API error: {e}"
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            self.error_message = str(e)
             yield rx.toast.error(self.error_message)
         finally:
             self.is_submitting = False

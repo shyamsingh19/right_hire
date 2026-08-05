@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
 from app.llm.factory import get_provider
-from app.models import Candidate, CandidateStatus, Evaluation, Job, Verdict
-from app.pipeline.embed import bytes_to_vec, embed_texts, vec_to_bytes
+from app.models import Candidate, CandidateStatus, Evaluation, Job
+from app.pipeline.embed import embed_texts, vec_to_bytes
 from app.pipeline.filters import apply_filters
 from app.pipeline.judge import judge_candidate
 from app.pipeline.match import match_candidate
@@ -21,6 +21,7 @@ from app.schemas import ParsedJD, ParsedResume
 from app.skills.canonicalize import canonicalize_skill
 
 logger = logging.getLogger(__name__)
+
 
 # RQ tasks are sync — use a sync SQLAlchemy engine
 def _sync_session() -> tuple[Session, sessionmaker]:
@@ -37,14 +38,16 @@ def _cache_key(resume_text: str, jd_parsed: dict) -> str:
 
 def _get_redis():
     import redis as redis_lib
+
     return redis_lib.from_url(settings.redis_url, decode_responses=True)
 
 
 def process_candidate(candidate_id: str, job_id: str) -> None:
     """Full pipeline for a single candidate. Runs inside an RQ worker."""
     session = _sync_session()
+    candidate: Candidate | None = None
     try:
-        candidate: Candidate | None = session.get(Candidate, candidate_id)
+        candidate = session.get(Candidate, candidate_id)
         job: Job | None = session.get(Job, job_id)
 
         if not candidate or not job:
@@ -113,11 +116,15 @@ def process_candidate(candidate_id: str, job_id: str) -> None:
         # ── Step 4: Embed ────────────────────────────────────────────────────
         bullets_to_embed = parsed_resume.bullets or [resume_text[:500]]
         candidate_vecs = embed_texts(bullets_to_embed)
-        candidate_vec = candidate_vecs.mean(axis=0) if len(candidate_vecs) > 1 else candidate_vecs[0]
+        candidate_vec = (
+            candidate_vecs.mean(axis=0) if len(candidate_vecs) > 1 else candidate_vecs[0]
+        )
         candidate.embedding = vec_to_bytes(candidate_vec)
         session.commit()
 
-        jd_text = " ".join(parsed_jd.required_skills + parsed_jd.preferred_skills + [parsed_jd.title])
+        jd_text = " ".join(
+            parsed_jd.required_skills + parsed_jd.preferred_skills + [parsed_jd.title]
+        )
         jd_vec = embed_texts([jd_text])[0]
 
         # ── Step 5: Match ────────────────────────────────────────────────────
@@ -151,8 +158,20 @@ def process_candidate(candidate_id: str, job_id: str) -> None:
     except Exception as exc:
         logger.exception("process_candidate failed for %s: %s", candidate_id, exc)
         if candidate:
-            candidate.status = CandidateStatus.failed
-            session.commit()
+            try:
+                candidate.status = CandidateStatus.failed
+                session.add(
+                    Evaluation(
+                        candidate_id=candidate.id,
+                        job_id=job_id,
+                        reasons={"error": str(exc)[:500]},
+                        model_used="error",
+                    )
+                )
+                session.commit()
+            except Exception:
+                logger.exception("Failed to record failure for candidate %s", candidate_id)
+                session.rollback()
     finally:
         session.close()
 

@@ -75,9 +75,11 @@ make worker
 ```bash
 # terminal C
 source .venv/bin/activate
+make migrate                    # first run only — creates the schema
 python scripts/seed_batch_test.py
 ```
-Prints the job ID and enqueues 15 candidates on the `ats` queue. Watch
+Prints a demo user's API key (first run only — save it, it's only shown once)
+plus the job ID, and enqueues 15 candidates on the `ats` queue. Watch
 terminal B — that's where parse/judge calls to your chosen backend actually
 happen, one per candidate.
 
@@ -90,7 +92,7 @@ The 15 are deliberately mixed:
 ## 5. Check results
 
 ```bash
-curl -s http://localhost:8001/jobs/<job_id>/results | python -m json.tool
+curl -s http://localhost:8001/jobs/<job_id>/results -H "X-API-Key: <key from step 4>" | python -m json.tool
 ```
 or the Reflex UI:
 ```bash

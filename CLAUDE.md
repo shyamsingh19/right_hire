@@ -8,20 +8,31 @@ AI-powered resume screening pipeline. Candidates are ingested from Excel or CSV,
 
 ## Setup
 
-There's no `Dockerfile` for `app`/`worker` yet and no `alembic.ini`, so `docker compose up -d` on its own and `make migrate` both fail. Run infra only in Docker, everything else on the host:
+`Dockerfile` and `alembic.ini` both exist now — either path works. Host path (recommended
+for `local` backend, so it can reach Ollama on `localhost` or a LAN GPU box):
 
 ```bash
 cp .env.example .env          # set DB creds, LLM_BACKEND, OLLAMA_URL
-docker compose up -d mysql redis   # skip app/worker — no Dockerfile yet
-                               # ports remapped to :3307 (MySQL) / :6380 (Redis)
+docker compose up -d mysql redis   # infra only — ports remapped to :3307 (MySQL) / :6380 (Redis)
                                # on boxes where native mysql/redis-server already own 3306/6379
 pip install -e ".[dev]"
+make migrate                  # alembic upgrade head — creates the schema
 make run                      # FastAPI on :8001 (Makefile hardcodes this port, not :8000)
 make worker                   # RQ worker — separate terminal
 make ui                       # optional UI on :3000 (Reflex dev server) — reads config.ini [ui] api_base
 ```
 
-Skip `make migrate` — tables are created automatically via `Base.metadata.create_all` in `app/main.py`'s lifespan (dev-only convenience) until Alembic is wired up.
+Fully containerized: `docker compose up -d` (builds `app`/`worker` from the root `Dockerfile`),
+then `docker compose exec app alembic upgrade head`.
+
+Tables are also auto-created on startup (`Base.metadata.create_all` in `app/main.py`'s
+lifespan, gated by `AUTO_CREATE_TABLES` — default `true`) as a zero-friction dev convenience.
+Set `AUTO_CREATE_TABLES=false` once Alembic is the source of truth for a deployment's schema —
+running both against the same DB will fight each other (`create_all` can't add columns to a
+table Alembic already created differently).
+
+Every route requires `X-API-Key` (see [Auth](#auth) below) — get one via `POST /auth/signup`
+before calling anything else, or use the UI's sidebar sign-up box.
 
 Switch LLM backend (no code change):
 ```bash
@@ -39,7 +50,7 @@ See [TESTING_GUIDE.md](TESTING_GUIDE.md) for a full end-to-end run (1 job + 15 v
 |---|---|
 | `make run` | `uvicorn app.main:app --reload` on :8001 |
 | `make worker` | `rq worker` consuming queue `ats` |
-| `make migrate` | `alembic upgrade head` (not yet wired — see TODOs) |
+| `make migrate` | `alembic upgrade head` |
 | `make seed` | Load demo job + 5 candidates, enqueue them |
 | `make test` | Unit tests only (`tests/unit/`), no external deps |
 | `make test-int` | Integration tests, skips `@pytest.mark.local` |
@@ -77,17 +88,19 @@ POST /jobs/{id}/candidates (Excel or CSV)
 app/
   config.py        # pydantic-settings — all env vars live here
   db.py            # async SQLAlchemy engine + get_db dependency
-  models.py        # ORM: Job, Candidate, Evaluation
+  auth.py          # API-key auth: hash/verify + get_current_user dependency
+  models.py        # ORM: User, Job, Candidate, Evaluation
   schemas.py       # Pydantic: ParsedResume, ParsedJD, JudgeOutput, API I/O
   main.py          # FastAPI app + router registration
-  api/             # Route handlers (jobs, ingest, results)
+  api/             # Route handlers (auth, jobs, ingest, results)
   llm/             # LLM abstraction layer (see below)
   pipeline/        # One file per stage: ingest, parse, filters, embed, match, judge, score
   skills/          # taxonomy.json + canonicalize.py (MiniLM similarity)
   workers/tasks.py # RQ task: full pipeline per candidate
 prompts/           # parse_resume.txt, parse_jd.txt, judge.txt  ({{PLACEHOLDER}} substitution)
 grammars/          # judge.gbnf  — forces valid JSON from local LLM
-alembic/           # DB migrations
+alembic/           # DB migrations — alembic.ini lives at repo root
+Dockerfile         # shared image for `app` and `worker` (docker-compose sets the command)
 tests/
   conftest.py      # FakeLLMProvider + test_db (SQLite) + client fixtures
   unit/            # filters, score, canonicalize — pure function tests
@@ -132,19 +145,47 @@ Adding a new provider: subclass `LLMProvider` in `app/llm/`, implement `complete
 
 ---
 
+## Auth
+
+Every route (except `/auth/signup` and `/health`) requires an `X-API-Key` header, checked by
+`get_current_user()` in `app/auth.py`. There's no login/session/JWT — just a random key per user:
+
+```python
+from app.auth import get_current_user
+from app.models import User
+
+@router.get("/jobs")
+async def list_jobs(db=Depends(get_db), user: User = Depends(get_current_user)): ...
+```
+
+- `POST /auth/signup {email}` → creates a `User`, returns the raw key **once**. Only its
+  SHA-256 hash (`User.api_key_hash`) is stored — there's no way to recover a lost key, only
+  issue a new user.
+- `Job.user_id` scopes ownership; `Candidate`/`Evaluation` inherit scoping transitively through
+  their `job_id`. Every route that takes a `job_id` must call `app.api.jobs._get_owned_job()`
+  (or otherwise filter by `Job.user_id == user.id`) — it 404s (not 403) on someone else's job,
+  so existence isn't leaked to a caller who doesn't own it.
+- The UI stores the key client-side in `localStorage` (`AppState.api_key` in
+  `ui/right_hire_ui/states/app_state.py`) and sends it on every request from `api_client.py`.
+
+---
+
 ## Data models
 
 | Table | Key columns |
 |---|---|
-| `jobs` | id (UUID str), title, jd_raw, jd_parsed (JSON), weights (JSON), thresholds (JSON) |
+| `users` | id (UUID str), email (unique), api_key_hash (sha256 hex, unique) |
+| `jobs` | id (UUID str), user_id (FK → users), title, jd_raw, jd_parsed (JSON), weights (JSON), thresholds (JSON) |
 | `candidates` | id, job_id, name, email, yoe (float), location, resume_url, resume_text, parsed (JSON), embedding (LONGBLOB), status |
 | `evaluations` | id, candidate_id, job_id, rubric (JSON), score (float), verdict (Fit/Maybe/Reject), reasons (JSON), model_used, cache_key |
 
-- `Candidate.status` enum: `pending → processing → done | failed`
+- `Candidate.status` enum: `pending → processing → done | failed`. A `failed` candidate always
+  gets an `Evaluation` row with `reasons.error` set (no score/verdict) — worker exceptions are
+  never silent, see `workers/tasks.py`'s except block.
 - `Evaluation.cache_key` = `sha256(resume_text + json(jd_parsed))` — used for Redis verdict caching
 - Embeddings stored as `float32` bytes: use `vec_to_bytes()` / `bytes_to_vec()` from `app/pipeline/embed.py`
 
-Schema changes require a new Alembic migration (`alembic revision --autogenerate -m "..."` then `make migrate`). Never edit existing migration files.
+Schema changes require a new Alembic migration (`alembic revision --autogenerate -m "..."` then `make migrate`). Never edit existing migration files — the baseline is `alembic/versions/0001_initial_schema.py`.
 
 ---
 
@@ -249,14 +290,17 @@ def test_something(fake_provider):
 |---|---|---|
 | `LLM_BACKEND` | `local` | `local` \| `groq` \| `openai` |
 | `OLLAMA_URL` | `http://localhost:11434` | Local Ollama instance |
-| `JUDGE_MODEL` | `qwen3:8b` | Any model available in Ollama |
+| `JUDGE_MODEL` | `qwen2.5:7b` | Any model available in Ollama |
 | `JUDGE_MAX_TOKENS` | `200` | Keep ≤300 |
-| `EMBED_MODEL` | `bge-m3` | Falls back to `all-MiniLM-L6-v2` if unavailable |
+| `EMBED_MODEL` | `all-MiniLM-L6-v2` | `.env.example` sets `BAAI/bge-m3` — either works, MiniLM is smaller/faster |
 | `DATABASE_URL` | `mysql+pymysql://ats:ats@localhost:3306/ats` | Sync URL (workers) |
 | `REDIS_URL` | `redis://localhost:6379/0` | Queue + verdict cache |
 | `STORAGE_DIR` | `./storage` | Resume file storage path |
 | `GROQ_API_KEY` | _(empty)_ | Required when `LLM_BACKEND=groq` |
 | `OPENAI_API_KEY` | _(empty)_ | Required when `LLM_BACKEND=openai` |
+| `CORS_ORIGINS` | `*` | Comma-separated allowlist, e.g. `https://app.example.com,http://localhost:3000` |
+| `MAX_UPLOAD_MB` | `10` | Hard cap on candidate-sheet upload size |
+| `AUTO_CREATE_TABLES` | `true` | Dev convenience via `create_all`; set `false` where Alembic owns the schema |
 
 `config.py` auto-derives `async_database_url` by replacing `pymysql` → `aiomysql` (or `sqlite` → `aiosqlite` for tests).
 
@@ -266,10 +310,11 @@ The Reflex UI is not configured through these — it reads `API_BASE` env var, f
 
 ## TODOs / known gaps
 
-- `TODO`: No Dockerfile yet — `docker compose up` will fail for the `app` and `worker` services until a `Dockerfile` is added.
-- `TODO`: `make lint` / CI workflow not yet defined.
+- `TODO`: `make lint` / CI workflow (GitHub Actions or similar) not yet defined — lint/tests only run locally today.
 - `TODO`: `eval_harness.py` expects a labeled CSV (`candidate_id,expected_verdict`) — no sample provided.
-- `TODO`: Alembic `alembic.ini` not yet present — needed for `make migrate` to work. Tables are created ad hoc via `Base.metadata.create_all` in `app/main.py` lifespan instead.
 - `TODO`: `GroqProvider.embed()` always raises `NotImplementedError`; embeddings always fall back to the local SentenceTransformer. Document this if Groq is the primary backend.
+- `TODO`: No password-reset / key-rotation endpoint — a lost API key means signing up again with a new email. Fine for MVP, revisit if this becomes a real support burden.
+- `TODO`: Results UI doesn't paginate past the backend's default 50-row page (`GET /jobs/{id}/results` supports `offset`/`limit`, the UI just doesn't send them yet).
 - `docker-compose.yml` maps MySQL/Redis to host ports `3307`/`6380` (not the `3306`/`6379` defaults in `config.py`) to avoid clashing with native `mysql`/`redis-server` services on dev machines — set `DATABASE_URL`/`REDIS_URL` in `.env` accordingly when running against this compose file.
 - The RQ queue name was previously inconsistent (`ingest.py` enqueued to `"default"` while `make worker` and `seed_demo.py` used `"ats"`, so candidates silently never got processed). Now fixed — everything enqueues to and consumes `"ats"`. If you add a new enqueue call, use `"ats"`, not `"default"`.
+- `[tool.ruff.lint] select` is pinned explicitly in `pyproject.toml` to pyflakes/pycodestyle only (`E4,E7,E9,F`) — newer ruff versions' unconfigured default pulls in a much larger rule set (bugbear, blind-except, etc.) that would flag idiomatic FastAPI patterns like `Depends(...)` as default-argument bugs. Don't remove that `select` line without checking `make lint` still passes cleanly.

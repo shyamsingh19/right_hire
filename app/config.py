@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     storage_dir: str = "./storage"
 
+    # API
+    cors_origins: str = (
+        "*"  # comma-separated list, e.g. "https://app.example.com,http://localhost:3000"
+    )
+    max_upload_mb: int = 10
+    # Dev-only convenience: auto-create tables on startup instead of requiring `alembic upgrade
+    # head` first. Set to false in any environment where Alembic manages the schema.
+    auto_create_tables: bool = True
+
     @property
     def async_database_url(self) -> str:
         """Return async-compatible database URL."""
@@ -35,6 +44,10 @@ class Settings(BaseSettings):
         if url.startswith("sqlite:///"):
             return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
         return url
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 settings = Settings()

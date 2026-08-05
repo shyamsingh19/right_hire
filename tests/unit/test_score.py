@@ -1,4 +1,3 @@
-import pytest
 from app.pipeline.score import aggregate_score, apply_thresholds
 from app.schemas import JudgeOutput
 
@@ -13,24 +12,18 @@ def _judge(overall: float = 0.8, verdict: str = "Fit") -> JudgeOutput:
 
 
 def test_fit_verdict():
-    score, verdict, _ = aggregate_score(
-        _judge(0.9), {"skill_overlap": 0.9, "cosine_sim": 0.85}, {}
-    )
+    score, verdict, _ = aggregate_score(_judge(0.9), {"skill_overlap": 0.9, "cosine_sim": 0.85}, {})
     assert verdict == "Fit"
     assert 0.0 <= score <= 1.0
 
 
 def test_reject_verdict():
-    score, verdict, _ = aggregate_score(
-        _judge(0.1), {"skill_overlap": 0.05, "cosine_sim": 0.1}, {}
-    )
+    score, verdict, _ = aggregate_score(_judge(0.1), {"skill_overlap": 0.05, "cosine_sim": 0.1}, {})
     assert verdict == "Reject"
 
 
 def test_maybe_verdict():
-    score, verdict, _ = aggregate_score(
-        _judge(0.55), {"skill_overlap": 0.5, "cosine_sim": 0.5}, {}
-    )
+    score, verdict, _ = aggregate_score(_judge(0.55), {"skill_overlap": 0.5, "cosine_sim": 0.5}, {})
     assert verdict == "Maybe"
 
 

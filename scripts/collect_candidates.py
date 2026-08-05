@@ -29,7 +29,7 @@ import os
 import re
 import time
 import webbrowser
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,13 +46,13 @@ if _env_path.exists():
             os.environ.setdefault(_k.strip(), _v.strip())
 
 # ── Config ────────────────────────────────────────────────────
-GITHUB_TOKEN   = os.getenv("GITHUB_TOKEN", "")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 
-OUTPUT_DIR   = Path(__file__).resolve().parent.parent / "output"
-OUTPUT_CSV   = OUTPUT_DIR / "candidates.csv"
-OUTPUT_HTML  = OUTPUT_DIR / "candidates.html"
-OUTPUT_XLSX  = OUTPUT_DIR / "candidates.xlsx"
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
+OUTPUT_CSV = OUTPUT_DIR / "candidates.csv"
+OUTPUT_HTML = OUTPUT_DIR / "candidates.html"
+OUTPUT_XLSX = OUTPUT_DIR / "candidates.xlsx"
 
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -71,13 +71,13 @@ log = logging.getLogger(__name__)
 # ── Data model ────────────────────────────────────────────────
 @dataclass
 class Candidate:
-    name:         str
-    email:        str | None = None
-    resume_url:   str | None = None
-    yoe:          int | None = None
-    location:     str | None = None
-    source:       str        = ""
-    collected_at: str        = ""
+    name: str
+    email: str | None = None
+    resume_url: str | None = None
+    yoe: int | None = None
+    location: str | None = None
+    source: str = ""
+    collected_at: str = ""
 
 
 # ── Live local sheet ──────────────────────────────────────────
@@ -118,7 +118,7 @@ class LocalSheet:
     def __init__(self):
         is_new = not OUTPUT_CSV.exists() or OUTPUT_CSV.stat().st_size == 0
         self._csv_file = open(OUTPUT_CSV, "a", newline="", encoding="utf-8")  # noqa: SIM115
-        self._writer   = csv.DictWriter(self._csv_file, fieldnames=FIELDS)
+        self._writer = csv.DictWriter(self._csv_file, fieldnames=FIELDS)
         if is_new:
             self._writer.writeheader()
             self._csv_file.flush()
@@ -149,7 +149,7 @@ class LocalSheet:
         self._csv_file.close()
 
     def _render_html(self) -> None:
-        ts   = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         rows = self._rows
         has_email = sum(1 for r in rows if r.get("email"))
 
@@ -161,7 +161,7 @@ class LocalSheet:
                 val = r.get(f, "")
                 if f == "resume_url" and val:
                     disp = val[:55] + "…" if len(val) > 55 else val
-                    val  = f'<a href="{val}" target="_blank">{disp}</a>'
+                    val = f'<a href="{val}" target="_blank">{disp}</a>'
                 elif f == "source":
                     cls = "badge-gh" if val == "github" else "badge-serper"
                     val = f'<span class="badge {cls}">{val}</span>'
@@ -174,12 +174,13 @@ class LocalSheet:
             body_rows.append("<tr>" + "".join(cells) + "</tr>")
 
         html = (
-            self._HTML_HEAD
-            + f'<div class="meta">&#128260; Auto-refreshes every 4 s &nbsp;|&nbsp; '
-            f'{len(rows)} candidates &nbsp;|&nbsp; '
-            f'emails found: {has_email}/{len(rows)} &nbsp;|&nbsp; '
-            f'last update: {ts}</div>\n'
-            + "<table><thead><tr>" + header_cells + "</tr></thead><tbody>"
+            self._HTML_HEAD + f'<div class="meta">&#128260; Auto-refreshes every 4 s &nbsp;|&nbsp; '
+            f"{len(rows)} candidates &nbsp;|&nbsp; "
+            f"emails found: {has_email}/{len(rows)} &nbsp;|&nbsp; "
+            f"last update: {ts}</div>\n"
+            + "<table><thead><tr>"
+            + header_cells
+            + "</tr></thead><tbody>"
             + "\n".join(body_rows)
             + "</tbody></table></body></html>"
         )
@@ -200,8 +201,9 @@ def enrich_email(c: Candidate) -> str | None:
         return None
 
     try:
-        resp = requests.get(c.resume_url, timeout=10, stream=True,
-                            headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(
+            c.resume_url, timeout=10, stream=True, headers={"User-Agent": "Mozilla/5.0"}
+        )
         resp.raise_for_status()
         content_type = resp.headers.get("Content-Type", "")
 
@@ -210,12 +212,14 @@ def enrich_email(c: Candidate) -> str | None:
             # Try pdfplumber first, fall back to pymupdf
             try:
                 import pdfplumber
+
                 with pdfplumber.open(io.BytesIO(raw)) as pdf:
                     text = "\n".join(p.extract_text() or "" for p in pdf.pages[:3])
             except Exception:
                 try:
                     import fitz  # pymupdf
-                    doc  = fitz.open(stream=raw, filetype="pdf")
+
+                    doc = fitz.open(stream=raw, filetype="pdf")
                     text = "\n".join(doc[i].get_text() for i in range(min(3, len(doc))))
                 except Exception:
                     return None
@@ -242,7 +246,7 @@ def enrich_all(candidates: list[Candidate], sheet: LocalSheet) -> None:
         email = enrich_email(c)
         if email:
             c.email = email
-            sheet.append_complete(c)   # write to sheet only now that it's complete
+            sheet.append_complete(c)  # write to sheet only now that it's complete
             found += 1
             log.info("  ✉  %s  →  %s", c.name, email)
         else:
@@ -264,23 +268,26 @@ def export_xlsx(candidates: list[Candidate]) -> None:
 
     # Bold header
     from openpyxl.styles import Font, PatternFill, Alignment
+
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor="343A40")
 
     ws.append(ATS_FIELDS)
     for cell in ws[1]:
-        cell.font  = header_font
-        cell.fill  = header_fill
+        cell.font = header_font
+        cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center")
 
     for c in candidates:
-        ws.append([
-            c.name or "",
-            c.email or "",
-            c.resume_url or "",
-            c.yoe if c.yoe is not None else "",
-            c.location or "",
-        ])
+        ws.append(
+            [
+                c.name or "",
+                c.email or "",
+                c.resume_url or "",
+                c.yoe if c.yoe is not None else "",
+                c.location or "",
+            ]
+        )
 
     # Auto column width
     for col in ws.columns:
@@ -307,7 +314,9 @@ def get(url, params=None, headers=None, pause=1.5):
         if not r.ok:
             try:
                 detail = r.json()
-                msg = detail.get("error", {}).get("message") or detail.get("message") or r.text[:200]
+                msg = (
+                    detail.get("error", {}).get("message") or detail.get("message") or r.text[:200]
+                )
             except Exception:
                 msg = r.text[:200]
             log.warning("HTTP %s on %s: %s", r.status_code, url, msg)
@@ -343,9 +352,9 @@ def from_github(query: str, limit: int, sheet: LocalSheet) -> list[Candidate]:
     if GITHUB_TOKEN:
         headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
 
-    pause   = 1.2 if GITHUB_TOKEN else 6.5
+    pause = 1.2 if GITHUB_TOKEN else 6.5
     results = []
-    page    = 1
+    page = 1
 
     while len(results) < limit:
         log.info("GitHub › page %d  (%d collected)", page, len(results))
@@ -369,9 +378,9 @@ def from_github(query: str, limit: int, sheet: LocalSheet) -> list[Candidate]:
             if not profile:
                 continue
 
-            name  = profile.get("name") or profile.get("login")
+            name = profile.get("name") or profile.get("login")
             email = clean_email(profile.get("email") or "")
-            site  = profile.get("blog") or ""
+            site = profile.get("blog") or ""
             if site and not site.startswith("http"):
                 site = "https://" + site
             resume_url = site or profile.get("html_url")
@@ -379,8 +388,13 @@ def from_github(query: str, limit: int, sheet: LocalSheet) -> list[Candidate]:
             if not name or (not email and not resume_url):
                 continue
 
-            c = Candidate(name=name, email=email, resume_url=resume_url,
-                          location=profile.get("location"), source="github")
+            c = Candidate(
+                name=name,
+                email=email,
+                resume_url=resume_url,
+                location=profile.get("location"),
+                source="github",
+            )
             results.append(c)
             sheet.append_complete(c)
             log.info("  ✓ %s  email=%s", name, email or "(none)")
@@ -394,10 +408,21 @@ def from_github(query: str, limit: int, sheet: LocalSheet) -> list[Candidate]:
 
 # Sites that host fake/template resumes — skip them
 _JUNK_DOMAINS = {
-    "qwikresume.com", "resumeworded.com", "enhancv.com", "novoresume.com",
-    "zety.com", "kickresume.com", "resumegenius.com", "resume.io",
-    "cloudfront.net", "livecareer.com", "resumehelp.com", "visualcv.com",
-    "resumelab.com", "myperfectresume.com", "resumebuilder.com",
+    "qwikresume.com",
+    "resumeworded.com",
+    "enhancv.com",
+    "novoresume.com",
+    "zety.com",
+    "kickresume.com",
+    "resumegenius.com",
+    "resume.io",
+    "cloudfront.net",
+    "livecareer.com",
+    "resumehelp.com",
+    "visualcv.com",
+    "resumelab.com",
+    "myperfectresume.com",
+    "resumebuilder.com",
     "assets.qwikresume.com",
 }
 
@@ -406,11 +431,18 @@ _NAME_RE = re.compile(r"^([A-Z][a-z]+(?: [A-Z][a-z]+){1,3})")
 
 def _is_junk(link: str, title: str) -> bool:
     from urllib.parse import urlparse
+
     domain = urlparse(link).netloc.lstrip("www.")
     if any(j in domain for j in _JUNK_DOMAINS):
         return True
-    junk_titles = {"resume", "resume.pdf", "cv", "curriculum vitae",
-                   "python developer", "software developer resume"}
+    junk_titles = {
+        "resume",
+        "resume.pdf",
+        "cv",
+        "curriculum vitae",
+        "python developer",
+        "software developer resume",
+    }
     if title.lower().strip() in junk_titles:
         return True
     return False
@@ -426,7 +458,8 @@ def _parse_name(title: str) -> str | None:
         name = m.group(1)
         # reject if it's a generic phrase
         if len(name.split()) >= 2 and not any(
-            w.lower() in ("python", "developer", "engineer", "resume", "software", "backend", "frontend")
+            w.lower()
+            in ("python", "developer", "engineer", "resume", "software", "backend", "frontend")
             for w in name.split()
         ):
             return name
@@ -487,8 +520,8 @@ def from_serper(query: str, limit: int, sheet: LocalSheet) -> list[Candidate]:
             for item in items:
                 if len(results) >= limit:
                     break
-                title   = item.get("title", "")
-                link    = item.get("link", "")
+                title = item.get("title", "")
+                link = item.get("link", "")
                 snippet = item.get("snippet", "")
 
                 if not link or link in seen_links:
@@ -506,7 +539,7 @@ def from_serper(query: str, limit: int, sheet: LocalSheet) -> list[Candidate]:
                 new_on_page += 1
 
                 # Grab email from snippet if visible; enrichment will fetch the rest
-                em    = EMAIL_RE.search(snippet)
+                em = EMAIL_RE.search(snippet)
                 email = clean_email(em.group()) if em else None
 
                 c = Candidate(name=name, email=email, resume_url=link, source="serper")
@@ -528,16 +561,11 @@ def from_serper(query: str, limit: int, sheet: LocalSheet) -> list[Candidate]:
 # ── Main ──────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--query",      default="python developer",
-                    help="Search keyword")
-    ap.add_argument("--limit",      type=int, default=20,
-                    help="Max candidates per source")
-    ap.add_argument("--source",     default="all",
-                    choices=["all", "github", "google"])
-    ap.add_argument("--no-enrich",  action="store_true",
-                    help="Skip email enrichment step")
-    ap.add_argument("--no-browser", action="store_true",
-                    help="Don't auto-open browser")
+    ap.add_argument("--query", default="python developer", help="Search keyword")
+    ap.add_argument("--limit", type=int, default=20, help="Max candidates per source")
+    ap.add_argument("--source", default="all", choices=["all", "github", "google"])
+    ap.add_argument("--no-enrich", action="store_true", help="Skip email enrichment step")
+    ap.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     args = ap.parse_args()
 
     sheet = LocalSheet()

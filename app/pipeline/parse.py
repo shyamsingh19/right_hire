@@ -18,6 +18,7 @@ def _load_prompt(name: str) -> str:
 
 # ── Text extraction ──────────────────────────────────────────────────────────
 
+
 def extract_text(file_path: str) -> str:
     """Extract plain text from a PDF (or image PDF) using a cascade of strategies.
 
@@ -89,6 +90,7 @@ def extract_text(file_path: str) -> str:
 
 
 # ── LLM-based parsing ────────────────────────────────────────────────────────
+
 
 def parse_resume(text: str, provider: LLMProvider) -> ParsedResume:
     """Parse raw resume text into a structured ParsedResume using the LLM."""

@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 
 from app.skills.canonicalize import canonicalize_skill, canonicalize_skills
 
@@ -23,7 +22,10 @@ def _mock_canonicalizer(taxonomy: list[str], sims: list[float]):
 def test_exact_match():
     taxonomy = ["Python", "JavaScript", "Docker"]
     sims = [0.99, 0.3, 0.4]
-    with patch("app.skills.canonicalize._get_canonicalizer", return_value=_mock_canonicalizer(taxonomy, sims)):
+    with patch(
+        "app.skills.canonicalize._get_canonicalizer",
+        return_value=_mock_canonicalizer(taxonomy, sims),
+    ):
         result = canonicalize_skill("python")
     assert result == "Python"
 
@@ -31,7 +33,10 @@ def test_exact_match():
 def test_near_match():
     taxonomy = ["Machine Learning", "Docker", "Python"]
     sims = [0.82, 0.3, 0.5]
-    with patch("app.skills.canonicalize._get_canonicalizer", return_value=_mock_canonicalizer(taxonomy, sims)):
+    with patch(
+        "app.skills.canonicalize._get_canonicalizer",
+        return_value=_mock_canonicalizer(taxonomy, sims),
+    ):
         result = canonicalize_skill("ML", threshold=0.75)
     assert result == "Machine Learning"
 
@@ -39,7 +44,10 @@ def test_near_match():
 def test_no_match_returns_original():
     taxonomy = ["Python", "Docker"]
     sims = [0.4, 0.3]  # both below threshold
-    with patch("app.skills.canonicalize._get_canonicalizer", return_value=_mock_canonicalizer(taxonomy, sims)):
+    with patch(
+        "app.skills.canonicalize._get_canonicalizer",
+        return_value=_mock_canonicalizer(taxonomy, sims),
+    ):
         result = canonicalize_skill("COBOL", threshold=0.75)
     assert result == "COBOL"
 
@@ -47,7 +55,10 @@ def test_no_match_returns_original():
 def test_canonicalize_skills_deduplicates():
     taxonomy = ["Python", "Docker"]
     sims = [0.95, 0.2]
-    with patch("app.skills.canonicalize._get_canonicalizer", return_value=_mock_canonicalizer(taxonomy, sims)):
+    with patch(
+        "app.skills.canonicalize._get_canonicalizer",
+        return_value=_mock_canonicalizer(taxonomy, sims),
+    ):
         result = canonicalize_skills(["python", "Python", "PYTHON"], threshold=0.75)
     assert result.count("Python") == 1
 

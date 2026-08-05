@@ -31,14 +31,14 @@ class UploadState(AppState):
             data = await file.read()
             content_type = api_client.infer_content_type(filename)
             result = await api_client.upload_candidates(
-                self.selected_job_id, filename, data, content_type
+                self.api_key, self.selected_job_id, filename, data, content_type
             )
             self.upload_result_message = (
                 f"Enqueued {result['queued_count']} candidates for evaluation."
             )
             yield rx.toast.success(self.upload_result_message)
-        except httpx.HTTPError as e:
-            self.upload_error = f"Upload failed: {e}"
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            self.upload_error = str(e)
             yield rx.toast.error(self.upload_error)
         finally:
             self.is_uploading = False

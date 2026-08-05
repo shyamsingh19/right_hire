@@ -1,4 +1,5 @@
 """Integration test: full pipeline with FakeLLMProvider — no network, no GPU."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -46,8 +47,12 @@ def test_filter_pass(sample_resume, sample_jd):
 
 def test_filter_yoe_fail(sample_jd):
     junior = ParsedResume(
-        name="Bob", email="b@b.com", yoe=1.0, location="SF",
-        skills=["Python", "PostgreSQL", "Docker"], bullets=[]
+        name="Bob",
+        email="b@b.com",
+        yoe=1.0,
+        location="SF",
+        skills=["Python", "PostgreSQL", "Docker"],
+        bullets=[],
     )
     passed, reason = apply_filters(junior, sample_jd, {})
     assert passed is False
@@ -79,7 +84,7 @@ def test_full_pipeline_fit(fake_provider, sample_resume, sample_jd):
     match = match_candidate(sample_resume, sample_jd, vec, vec)
     rubric = {"technical_fit": 1.0}
     judge_out = judge_candidate(match, sample_jd, rubric, fake_provider)
-    score, verdict = aggregate_score(judge_out, match, {})
+    score, verdict, _breakdown = aggregate_score(judge_out, match, {})
 
     assert verdict in ("Fit", "Maybe", "Reject")
     assert 0.0 <= score <= 1.0

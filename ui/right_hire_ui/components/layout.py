@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import reflex as rx
 
+from right_hire_ui.states.app_state import AppState
+
 NAV_ITEMS = [
     ("/", "Create Job", "file-plus"),
     ("/upload", "Upload Candidates", "upload"),
@@ -33,6 +35,58 @@ def _nav_link(route: str, label: str, icon: str) -> rx.Component:
     )
 
 
+def _account_widget() -> rx.Component:
+    """Every API call needs an X-API-Key — this is the only place a user gets or pastes one."""
+    signed_in = rx.hstack(
+        rx.icon("key-round", size=14, color=rx.color("grass", 9)),
+        rx.text("Connected", size="1", color=rx.color("gray", 11)),
+        rx.spacer(),
+        rx.link("Log out", on_click=AppState.log_out, size="1", color=rx.color("gray", 9)),
+        align="center",
+        width="100%",
+    )
+    signed_out = rx.vstack(
+        rx.text("Get an API key to use Right Hire", size="1", color=rx.color("gray", 11)),
+        rx.input(
+            placeholder="you@company.com",
+            value=AppState.signup_email,
+            on_change=AppState.set_signup_email,
+            size="1",
+        ),
+        rx.button(
+            "Sign up",
+            on_click=AppState.signup,
+            loading=AppState.is_authenticating,
+            size="1",
+            width="100%",
+        ),
+        rx.cond(
+            AppState.auth_error != "",
+            rx.text(AppState.auth_error, size="1", color=rx.color("red", 9)),
+        ),
+        rx.divider(),
+        rx.text("...or paste an existing key", size="1", color=rx.color("gray", 9)),
+        rx.input(
+            placeholder="rh_...",
+            value=AppState.key_input,
+            on_change=AppState.set_key_input,
+            size="1",
+        ),
+        rx.button(
+            "Use key", on_click=AppState.use_existing_key, size="1", width="100%", variant="soft"
+        ),
+        spacing="2",
+        width="100%",
+    )
+    return rx.box(
+        rx.cond(AppState.is_authenticated, signed_in, signed_out),
+        padding="0.75em",
+        border_radius="var(--radius-4)",
+        background=rx.color("gray", 2),
+        width="100%",
+    )
+
+
 def _sidebar() -> rx.Component:
     return rx.vstack(
         rx.hstack(
@@ -44,6 +98,7 @@ def _sidebar() -> rx.Component:
         ),
         *[_nav_link(route, label, icon) for route, label, icon in NAV_ITEMS],
         rx.spacer(),
+        _account_widget(),
         rx.color_mode.button(),
         spacing="2",
         width="240px",

@@ -52,9 +52,7 @@ class GroqProvider(LLMProvider):
             import httpx
 
             schema_hint = json.dumps(schema.model_json_schema(), indent=2)
-            full_prompt = (
-                f"{prompt}\n\nRespond ONLY with valid JSON matching:\n{schema_hint}"
-            )
+            full_prompt = f"{prompt}\n\nRespond ONLY with valid JSON matching:\n{schema_hint}"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",

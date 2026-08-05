@@ -20,14 +20,15 @@ def build_judge_prompt(matched: dict, parsed_jd: ParsedJD, rubric: dict) -> str:
 
     required = ", ".join(parsed_jd.required_skills[:10]) or "N/A"
     matched_skills_str = ", ".join(matched.get("matched_skills", [])[:10]) or "none"
-    matched_bullets_str = "\n".join(
-        f"- {b}" for b in matched.get("matched_bullets", [])[:5]
-    ) or "- (none)"
-    criteria_str = ", ".join(rubric.keys()) if rubric else "technical_fit, communication, leadership"
+    matched_bullets_str = (
+        "\n".join(f"- {b}" for b in matched.get("matched_bullets", [])[:5]) or "- (none)"
+    )
+    criteria_str = (
+        ", ".join(rubric.keys()) if rubric else "technical_fit, communication, leadership"
+    )
 
     return (
-        template
-        .replace("{{REQUIRED_SKILLS}}", required)
+        template.replace("{{REQUIRED_SKILLS}}", required)
         .replace("{{MATCHED_SKILLS}}", matched_skills_str)
         .replace("{{MATCHED_BULLETS}}", matched_bullets_str)
         .replace("{{RUBRIC_CRITERIA}}", criteria_str)

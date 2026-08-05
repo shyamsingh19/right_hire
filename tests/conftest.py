@@ -6,7 +6,6 @@ from typing import Generator
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db import Base, get_db
@@ -14,6 +13,7 @@ from app.llm.base import LLMProvider
 from app.schemas import JudgeOutput, ParsedJD, ParsedResume
 
 # ── FakeLLMProvider ──────────────────────────────────────────────────────────
+
 
 class FakeLLMProvider(LLMProvider):
     """Returns deterministic canned outputs. No GPU, no network required."""
@@ -87,6 +87,7 @@ async def test_db() -> AsyncSession:
 
 # ── TestClient with provider override ────────────────────────────────────────
 
+
 @pytest.fixture
 def client(fake_provider) -> Generator:
     from app import db as db_module
@@ -111,8 +112,19 @@ def client(fake_provider) -> Generator:
     db_module.engine = engine
     try:
         with TestClient(app, raise_server_exceptions=True) as c:
+            # All routes require an API key — sign up a default user so existing
+            # tests that don't care about auth (most of them) work unmodified.
+            signup = c.post("/auth/signup", json={"email": "test@example.com"})
+            c.headers["X-API-Key"] = signup.json()["api_key"]
             yield c
     finally:
         db_module.engine = original_engine
         app.dependency_overrides.clear()
         asyncio.run(engine.dispose())
+
+
+@pytest.fixture
+def other_user_headers(client) -> dict:
+    """A second, distinct user's auth header — for cross-user isolation tests."""
+    signup = client.post("/auth/signup", json={"email": "other@example.com"})
+    return {"X-API-Key": signup.json()["api_key"]}

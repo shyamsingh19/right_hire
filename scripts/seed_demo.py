@@ -1,17 +1,22 @@
 #!/usr/bin/env python
 """Seed the database with a sample job and 5 candidates, and enqueue them."""
+
 from __future__ import annotations
 
 import asyncio
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.auth import generate_api_key, hash_api_key
 from app.config import settings
 from app.db import Base
 from app.llm.factory import get_provider
-from app.models import Candidate, CandidateStatus, Job
+from app.models import Candidate, CandidateStatus, Job, User
 from app.pipeline.parse import parse_jd
+
+DEMO_EMAIL = "demo@right-hire.local"
 
 SAMPLE_JD = """
 We are looking for a Senior Python Engineer to join our backend team.
@@ -29,16 +34,41 @@ Location: San Francisco, CA (hybrid)
 """
 
 SAMPLE_CANDIDATES = [
-    {"name": "Alice Chen", "email": "alice@example.com", "yoe": 6.0, "location": "San Francisco, CA",
-     "resume_text": "6 years Python, PostgreSQL, Docker, Redis, FastAPI. Led 3 backend rewrites. AWS certified."},
-    {"name": "Bob Smith", "email": "bob@example.com", "yoe": 4.5, "location": "Remote",
-     "resume_text": "4.5 years Python, PostgreSQL, Docker. Built data pipeline at FinTech startup."},
-    {"name": "Carol Wang", "email": "carol@example.com", "yoe": 2.0, "location": "New York",
-     "resume_text": "2 years Python and Django. MySQL. No Docker experience yet."},
-    {"name": "Dan Lee", "email": "dan@example.com", "yoe": 8.0, "location": "San Francisco, CA",
-     "resume_text": "8 years Java and some Python. PostgreSQL expert. Kubernetes and Docker."},
-    {"name": "Eva Müller", "email": "eva@example.com", "yoe": 5.0, "location": "Berlin",
-     "resume_text": "5 years Python, FastAPI, PostgreSQL, Redis. Open-source contributor. Remote-only."},
+    {
+        "name": "Alice Chen",
+        "email": "alice@example.com",
+        "yoe": 6.0,
+        "location": "San Francisco, CA",
+        "resume_text": "6 years Python, PostgreSQL, Docker, Redis, FastAPI. Led 3 backend rewrites. AWS certified.",
+    },
+    {
+        "name": "Bob Smith",
+        "email": "bob@example.com",
+        "yoe": 4.5,
+        "location": "Remote",
+        "resume_text": "4.5 years Python, PostgreSQL, Docker. Built data pipeline at FinTech startup.",
+    },
+    {
+        "name": "Carol Wang",
+        "email": "carol@example.com",
+        "yoe": 2.0,
+        "location": "New York",
+        "resume_text": "2 years Python and Django. MySQL. No Docker experience yet.",
+    },
+    {
+        "name": "Dan Lee",
+        "email": "dan@example.com",
+        "yoe": 8.0,
+        "location": "San Francisco, CA",
+        "resume_text": "8 years Java and some Python. PostgreSQL expert. Kubernetes and Docker.",
+    },
+    {
+        "name": "Eva Müller",
+        "email": "eva@example.com",
+        "yoe": 5.0,
+        "location": "Berlin",
+        "resume_text": "5 years Python, FastAPI, PostgreSQL, Redis. Open-source contributor. Remote-only.",
+    },
 ]
 
 
@@ -53,7 +83,20 @@ async def seed() -> None:
     parsed = parse_jd(SAMPLE_JD, provider)
 
     async with factory() as session:
+        user = (
+            await session.execute(select(User).where(User.email == DEMO_EMAIL))
+        ).scalar_one_or_none()
+        if user:
+            print(f"Reusing existing demo user {DEMO_EMAIL} — use the API key from its first run.")
+        else:
+            api_key = generate_api_key()
+            user = User(email=DEMO_EMAIL, api_key_hash=hash_api_key(api_key))
+            session.add(user)
+            await session.flush()
+            print(f"Created demo user {DEMO_EMAIL} — API key (save this, shown once): {api_key}")
+
         job = Job(
+            user_id=user.id,
             title="Senior Python Engineer",
             jd_raw=SAMPLE_JD,
             jd_parsed=parsed.model_dump(),

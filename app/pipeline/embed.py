@@ -23,7 +23,9 @@ def get_embedder():
         logger.info("Loaded embedding model: %s", model_name)
         return model
     except Exception as exc:
-        logger.warning("Failed to load %s (%s), falling back to %s", model_name, exc, _FALLBACK_MODEL)
+        logger.warning(
+            "Failed to load %s (%s), falling back to %s", model_name, exc, _FALLBACK_MODEL
+        )
         return SentenceTransformer(_FALLBACK_MODEL)
 
 

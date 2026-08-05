@@ -6,8 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.jobs import _get_owned_job
+from app.auth import get_current_user
 from app.db import get_db
-from app.models import Candidate, Evaluation, Job
+from app.models import Candidate, Evaluation, User
 from app.pipeline.score import _DEFAULT_THRESHOLDS
 from app.schemas import (
     BatchStats,
@@ -23,13 +25,14 @@ router = APIRouter(tags=["results"])
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _build_reasoning_card(
     eval_obj: Evaluation,
     all_scores: list[float],
 ) -> ReasoningCard:
     """Build a human-readable reasoning card from stored evaluation data."""
     reasons: dict = eval_obj.reasons or {}
-    rubric:  dict = eval_obj.rubric  or {}
+    rubric: dict = eval_obj.rubric or {}
     score = float(eval_obj.score or 0.0)
     verdict = eval_obj.verdict or "Reject"
 
@@ -57,8 +60,7 @@ def _build_reasoning_card(
         matched_skills = raw if isinstance(raw, list) else []
 
     criterion_reasons = {
-        k: v for k, v in reasons.items()
-        if k not in ("matched_skills",) and isinstance(v, str)
+        k: v for k, v in reasons.items() if k not in ("matched_skills",) and isinstance(v, str)
     }
 
     # One-line summary
@@ -117,15 +119,16 @@ def _suggest_thresholds(scores: list[float]) -> dict[str, float]:
     if len(scores) < 3:
         return dict(_DEFAULT_THRESHOLDS)
     s = sorted(scores)
-    fit_idx   = max(0, int(len(s) * 0.70))   # top 30%
-    maybe_idx = max(0, int(len(s) * 0.30))   # top 70%
+    fit_idx = max(0, int(len(s) * 0.70))  # top 30%
+    maybe_idx = max(0, int(len(s) * 0.30))  # top 70%
     return {
-        "fit":   round(s[fit_idx], 2),
+        "fit": round(s[fit_idx], 2),
         "maybe": round(s[maybe_idx], 2),
     }
 
 
 # ── routes ───────────────────────────────────────────────────────────────────
+
 
 @router.get("/jobs/{job_id}/results", response_model=list[CandidateWithEval])
 async def list_results(
@@ -134,11 +137,9 @@ async def list_results(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    # Verify job exists
-    job = await db.get(Job, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    await _get_owned_job(db, job_id, user)
 
     # Fetch ALL scores for this job upfront (needed for percentile)
     all_evals_result = await db.execute(
@@ -166,29 +167,29 @@ async def list_results(
             eval_response = EvaluationResponse.model_validate(eval_obj)
             eval_response.reasoning_card = _build_reasoning_card(eval_obj, all_scores)
 
-        out.append(CandidateWithEval(
-            candidate=CandidateResponse.model_validate(c),
-            evaluation=eval_response,
-        ))
+        out.append(
+            CandidateWithEval(
+                candidate=CandidateResponse.model_validate(c),
+                evaluation=eval_response,
+            )
+        )
 
     return out
 
 
 @router.get("/jobs/{job_id}/stats", response_model=BatchStats)
-async def batch_stats(job_id: str, db: AsyncSession = Depends(get_db)):
+async def batch_stats(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """Score distribution, verdict breakdown, and data-driven threshold suggestions."""
-    job = await db.get(Job, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    job = await _get_owned_job(db, job_id, user)
 
-    total_result = await db.execute(
-        select(Candidate).where(Candidate.job_id == job_id)
-    )
+    total_result = await db.execute(select(Candidate).where(Candidate.job_id == job_id))
     total = len(total_result.scalars().all())
 
-    evals_result = await db.execute(
-        select(Evaluation).where(Evaluation.job_id == job_id)
-    )
+    evals_result = await db.execute(select(Evaluation).where(Evaluation.job_id == job_id))
     evals: list[Evaluation] = evals_result.scalars().all()
 
     scores = [float(e.score) for e in evals if e.score is not None]
@@ -220,10 +221,15 @@ async def batch_stats(job_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/evaluations/{eval_id}", response_model=EvaluationResponse)
-async def get_evaluation(eval_id: str, db: AsyncSession = Depends(get_db)):
+async def get_evaluation(
+    eval_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     eval_obj = await db.get(Evaluation, eval_id)
     if not eval_obj:
         raise HTTPException(status_code=404, detail="Evaluation not found")
+    await _get_owned_job(db, eval_obj.job_id, user)  # 404s if the eval belongs to another user
 
     # Fetch sibling scores for percentile
     all_scores_result = await db.execute(
