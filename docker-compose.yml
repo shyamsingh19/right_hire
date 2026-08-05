@@ -1,25 +1,6 @@
 version: "3.9"
 
 services:
-  mysql:
-    image: mysql:8.0
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: ats
-      MYSQL_USER: ats
-      MYSQL_PASSWORD: ats
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "ats", "-p$$MYSQL_PASSWORD"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   app:
     build: .
     restart: unless-stopped
@@ -30,9 +11,6 @@ services:
       - .:/app
       - storage_data:/app/storage
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    depends_on:
-      mysql:
-        condition: service_healthy
 
   worker:
     build: .
@@ -41,13 +19,8 @@ services:
     volumes:
       - .:/app
       - storage_data:/app/storage
-    # REDIS_URL is resolved from UPSTASH_REDIS_REST_URL/TOKEN at runtime via app/config.py
     command: >
       sh -c "rq worker --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats"
-    depends_on:
-      mysql:
-        condition: service_healthy
 
 volumes:
-  mysql_data:
   storage_data:

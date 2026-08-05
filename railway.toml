@@ -1,0 +1,6 @@
+[build]
+builder = "dockerfile"
+
+[deploy]
+startCommand = "python -c 'from app.config import settings; import subprocess; subprocess.run([\"rq\", \"worker\", \"--url\", settings.effective_redis_url, \"ats\"], check=True)'"
+restartPolicyType = "always"
