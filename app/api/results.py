@@ -25,6 +25,40 @@ from app.schemas import (
 
 router = APIRouter(tags=["results"])
 
+# Below this many scored peers a percentile is noise — "top 100%" out of one candidate
+# tells a recruiter nothing. Rank ("#2 of 3") stays honest at any size and is shown instead.
+_MIN_COHORT_FOR_PERCENTILE = 10
+
+
+def _friendly_error(raw: str | None) -> str:
+    """Turn an internal exception string into something a recruiter can act on.
+
+    These reach a customer's screen, so they must say what to do next — never leak a
+    Python traceback fragment as if it were a hiring signal.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return "This candidate could not be processed. Try re-queuing them."
+    lowered = text.lower()
+    if "no resume_text and no resume_url" in lowered:
+        return (
+            "No resume was provided for this candidate — the uploaded sheet had no "
+            "resume link. Attach a resume file below to evaluate them."
+        )
+    if "could not resolve resume file" in lowered:
+        return (
+            "The resume link couldn't be opened. It may be private, expired, or not a "
+            "direct file link. Attach the resume file below instead."
+        )
+    if "no extractable text" in lowered:
+        return (
+            "The resume file was downloaded but no text could be read from it — it may "
+            "be a scanned image or an unsupported format. Try a text-based PDF."
+        )
+    if "failed to queue" in lowered:
+        return "This candidate was never queued for processing. Re-queue them to try again."
+    return f"Processing failed: {text}"
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,13 +71,30 @@ def _build_reasoning_card(
     reasons: dict = eval_obj.reasons or {}
     rubric: dict = eval_obj.rubric or {}
     score = float(eval_obj.score or 0.0)
-    verdict = eval_obj.verdict or "Reject"
 
-    # Percentile within this job's evaluated batch
+    # A missing verdict means the pipeline never reached a decision — the candidate
+    # failed to process. Presenting that as "Reject" would tell a recruiter this person
+    # was assessed and turned down, which is false and could discard a real candidate.
+    if eval_obj.verdict is None:
+        return ReasoningCard(
+            verdict="Unprocessed",
+            final_score=0.0,
+            cohort_size=len(all_scores),
+            summary=_friendly_error(reasons.get("error") if isinstance(reasons, dict) else None),
+            error=_friendly_error(reasons.get("error") if isinstance(reasons, dict) else None),
+        )
+
+    verdict = eval_obj.verdict
+
+    # Rank within this job's scored batch (1 = best). Percentile only once it means something.
+    rank: int | None = None
     percentile: float | None = None
-    if all_scores:
-        below = sum(1 for s in all_scores if s < score)
-        percentile = round(below / len(all_scores) * 100, 1)
+    cohort_size = len(all_scores)
+    if cohort_size:
+        rank = 1 + sum(1 for s in all_scores if s > score)
+        if cohort_size >= _MIN_COHORT_FOR_PERCENTILE:
+            below = sum(1 for s in all_scores if s < score)
+            percentile = round(below / cohort_size * 100, 1)
 
     # Score breakdown stored under _score_breakdown key in reasons
     breakdown_data: dict = reasons.pop("_score_breakdown", {}) if isinstance(reasons, dict) else {}
@@ -66,21 +117,28 @@ def _build_reasoning_card(
         k: v for k, v in reasons.items() if k not in ("matched_skills",) and isinstance(v, str)
     }
 
-    # One-line summary
+    # One-line summary. Rank is only worth stating when there's someone to rank against.
     top_skill = matched_skills[0] if matched_skills else None
-    pct_str = f"top {100 - int(percentile or 0)}%" if percentile is not None else ""
+    rank_str = f"ranked #{rank} of {cohort_size}" if rank and cohort_size > 1 else ""
+    skills_str = (
+        f"{len(matched_skills)} required skill{'s' if len(matched_skills) != 1 else ''} confirmed"
+        if matched_skills
+        else "no required skills matched"
+    )
     if verdict == "Fit":
-        summary = f"Strong match — {pct_str}{',' if pct_str else ''} {len(matched_skills)} required skills confirmed."
+        lead = f"Strong match (incl. {top_skill})" if top_skill else "Strong match"
+        summary = f"{lead} — {skills_str}"
     elif verdict == "Maybe":
-        summary = f"Borderline candidate{(' — ' + pct_str) if pct_str else ''}. Review manually before deciding."
+        summary = f"Borderline candidate — {skills_str}. Review manually before deciding"
     else:
-        summary = "Does not meet minimum requirements for this role."
-    if top_skill:
-        summary = summary.replace("Strong match", f"Strong match (incl. {top_skill})")
+        summary = "Does not meet the minimum requirements for this role"
+    summary = f"{summary}{f' ({rank_str})' if rank_str else ''}."
 
     return ReasoningCard(
         verdict=verdict,
         final_score=score,
+        rank=rank,
+        cohort_size=cohort_size,
         percentile=percentile,
         score_breakdown=score_breakdown,
         criterion_scores={k: float(v) for k, v in rubric.items() if isinstance(v, (int, float))},
@@ -196,7 +254,7 @@ async def export_results_csv(
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(
-        ["name", "email", "yoe", "location", "status", "verdict", "score", "model_used"]
+        ["name", "email", "yoe", "location", "status", "verdict", "score", "notes", "model_used"]
     )
     for c in candidates:
         eval_obj: Evaluation | None = (
@@ -204,6 +262,17 @@ async def export_results_csv(
         ).scalar_one_or_none()
         if verdict and (not eval_obj or eval_obj.verdict != verdict):
             continue
+
+        # A blank verdict column reads as "rejected" to whoever opens this in Excel.
+        # Say plainly that the candidate was never assessed, and why.
+        if eval_obj is None:
+            verdict_cell, notes = "Not evaluated", "Still queued for processing."
+        elif eval_obj.verdict is None:
+            verdict_cell = "Unprocessed"
+            notes = _friendly_error((eval_obj.reasons or {}).get("error"))
+        else:
+            verdict_cell, notes = eval_obj.verdict, ""
+
         writer.writerow(
             [
                 c.name or "",
@@ -211,8 +280,9 @@ async def export_results_csv(
                 c.yoe if c.yoe is not None else "",
                 c.location or "",
                 c.status,
-                eval_obj.verdict if eval_obj else "",
+                verdict_cell,
                 f"{eval_obj.score:.4f}" if eval_obj and eval_obj.score is not None else "",
+                notes,
                 eval_obj.model_used if eval_obj else "",
             ]
         )

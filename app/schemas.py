@@ -91,12 +91,19 @@ class ReasoningCard(BaseModel):
 
     verdict: str
     final_score: float
+    # Rank is honest at any cohort size; percentile is only populated once the batch is
+    # big enough for it to mean anything (see _MIN_COHORT_FOR_PERCENTILE in api/results.py).
+    rank: int | None = None
+    cohort_size: int = 0
     percentile: float | None = None  # 0–100, position within this job's batch
     score_breakdown: ScoreBreakdown | None = None
     criterion_scores: dict[str, float] = Field(default_factory=dict)
     criterion_reasons: dict[str, str] = Field(default_factory=dict)
     matched_skills: list[str] = Field(default_factory=list)
     summary: str = ""
+    # Set only when the candidate could not be processed at all. A card with `error`
+    # set is NOT a merit-based rejection and must never be presented as one.
+    error: str | None = None
 
 
 class EvaluationResponse(BaseModel):

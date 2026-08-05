@@ -127,6 +127,35 @@ def test_process_candidate_missing_row_is_a_noop(sync_factory):
     tasks_module.process_candidate("nonexistent", "also-nonexistent")  # must not raise
 
 
+def test_process_candidate_backfills_missing_yoe_and_location(sync_factory):
+    """A sheet with only name+email must not leave the results table showing N/A —
+    the parsed resume fills the gaps (FakeLLMProvider returns yoe=5.0, San Francisco)."""
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, "5 years of Python and Docker.")
+
+    tasks_module.process_candidate(candidate_id, job_id)
+
+    session = sync_factory()
+    candidate = session.get(Candidate, candidate_id)
+    assert candidate.yoe == 5.0
+    assert candidate.location == "San Francisco, CA"
+
+
+def test_process_candidate_does_not_overwrite_sheet_provided_values(sync_factory):
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, "5 years of Python and Docker.")
+    session = sync_factory()
+    candidate = session.get(Candidate, candidate_id)
+    candidate.yoe = 9.0
+    candidate.location = "Berlin"
+    session.commit()
+
+    tasks_module.process_candidate(candidate_id, job_id)
+
+    session = sync_factory()
+    candidate = session.get(Candidate, candidate_id)
+    assert candidate.yoe == 9.0
+    assert candidate.location == "Berlin"
+
+
 def test_process_candidate_fails_loudly_with_no_resume_text_or_url(sync_factory):
     """Guards the Critical Blocker #1 fix: a candidate with neither resume_text nor a
     resolvable resume_url must never silently get scored against empty text — it should

@@ -83,16 +83,30 @@ def _skill_tag(skill: str) -> rx.Component:
 
 def _result_header(row: dict) -> rx.Component:
     has_eval = row["has_eval"].to(bool)
-    percentile_display = row["percentile_display"].to(str)
+    is_error = row["is_error"].to(bool)
+    rank_display = row["rank_display"].to(str)
     return rx.hstack(
         rx.cond(
-            has_eval, verdict_pill(row["verdict"].to(str)), status_badge(row["status"].to(str))
+            is_error,
+            rx.badge(
+                rx.icon("triangle-alert", size=12),
+                "Needs attention",
+                color_scheme="orange",
+                variant="soft",
+                size="2",
+                radius="full",
+            ),
+            rx.cond(
+                has_eval,
+                verdict_pill(row["verdict"].to(str)),
+                status_badge(row["status"].to(str)),
+            ),
         ),
         rx.text(row["name"].to(str), weight="medium"),
         rx.text(row["score_display"].to(str), size="2", color=rx.color("gray", 10)),
         rx.cond(
-            percentile_display != "",
-            rx.badge(percentile_display, variant="soft", color_scheme="grass", size="1"),
+            rank_display != "",
+            rx.badge(rank_display, variant="soft", color_scheme="gray", size="1"),
         ),
         spacing="3",
         align="center",
@@ -101,16 +115,27 @@ def _result_header(row: dict) -> rx.Component:
 
 def _result_content(row: dict) -> rx.Component:
     has_eval = row["has_eval"].to(bool)
+    is_error = row["is_error"].to(bool)
     rubric_rows = row["rubric_rows"].to(list[dict[str, Any]])
     breakdown_rows = row["breakdown_rows"].to(list[dict[str, Any]])
     matched_skills = row["matched_skills"].to(list[str])
     summary = row["summary"].to(str)
 
     return rx.vstack(
-        # Summary callout
+        # Processing failures get an amber "we couldn't assess this" callout — never the
+        # blue informational one, which reads as a completed judgement.
         rx.cond(
-            has_eval & (summary != ""),
-            rx.callout(summary, icon="info", color_scheme="blue", size="1"),
+            is_error,
+            rx.callout(
+                row["error"].to(str),
+                icon="triangle-alert",
+                color_scheme="orange",
+                size="1",
+            ),
+            rx.cond(
+                has_eval & (summary != ""),
+                rx.callout(summary, icon="info", color_scheme="blue", size="1"),
+            ),
         ),
         # Basic info grid
         rx.grid(

@@ -21,13 +21,19 @@ def _build_row(item: dict) -> dict:
     e = item.get("evaluation")
     rc = e.get("reasoning_card") if e else None
 
-    verdict = e["verdict"] if e else c["status"]
-    score = e.get("score") if e else None
-    score_display = f"{score:.2f}" if score is not None else "N/A"
+    # An evaluation with no verdict is a processing failure, not a rejection — surface it
+    # as its own state so a recruiter never reads "Reject" for a resume we couldn't open.
+    error = (rc.get("error") if rc else None) or ""
+    is_error = bool(error)
 
-    # Percentile from reasoning card
-    percentile = rc.get("percentile") if rc else None
-    percentile_display = f"Top {100 - int(percentile)}%" if percentile is not None else ""
+    verdict = ("Unprocessed" if is_error else e["verdict"]) if e else c["status"]
+    score = None if is_error else (e.get("score") if e else None)
+    score_display = f"{score:.2f}" if score is not None else "—"
+
+    # Rank beats percentile: "#2 of 3" is honest, "Top 100%" out of one candidate is noise.
+    rank = rc.get("rank") if rc else None
+    cohort_size = (rc.get("cohort_size") or 0) if rc else 0
+    rank_display = f"#{rank} of {cohort_size}" if rank and cohort_size > 1 and not is_error else ""
 
     # Summary sentence
     summary = rc.get("summary", "") if rc else ""
@@ -82,10 +88,12 @@ def _build_row(item: dict) -> dict:
         "yoe": str(c.get("yoe")) if c.get("yoe") is not None else "N/A",
         "location": c.get("location") or "N/A",
         "status": c["status"],
-        "has_eval": e is not None,
+        "has_eval": e is not None and not is_error,
+        "is_error": is_error,
+        "error": error,
         "verdict": verdict,
         "score_display": score_display,
-        "percentile_display": percentile_display,
+        "rank_display": rank_display,
         "summary": summary,
         "matched_skills": matched_skills,
         "breakdown_rows": breakdown_rows,

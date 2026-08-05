@@ -130,6 +130,15 @@ def process_candidate(candidate_id: str, job_id: str) -> None:
         )
 
         candidate.parsed = parsed_resume.model_dump()
+        # Backfill columns the uploaded sheet left blank — the resume itself is the better
+        # source, and without this the results table shows "N/A" for every candidate whose
+        # sheet only had name+email. Never overwrite a value the recruiter supplied.
+        if candidate.yoe is None and parsed_resume.yoe:
+            candidate.yoe = parsed_resume.yoe
+        if not candidate.location and parsed_resume.location:
+            candidate.location = parsed_resume.location
+        if not candidate.name and parsed_resume.name:
+            candidate.name = parsed_resume.name
         session.commit()
 
         # ── Step 3: Hard filters ─────────────────────────────────────────────
