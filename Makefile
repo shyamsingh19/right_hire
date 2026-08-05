@@ -1,7 +1,10 @@
-.PHONY: run worker migrate seed test test-int lint eval
+.PHONY: run worker migrate seed test test-int lint eval ui
 
 run:
 	uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+
+ui:
+	cd ui && reflex run
 
 worker:
 	rq worker --url $${REDIS_URL:-redis://localhost:6379/0} ats

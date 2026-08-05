@@ -54,3 +54,7 @@ logs/
 # Jupyter (if used for eval/analysis)
 .ipynb_checkpoints/
 *.ipynb
+
+# Reflex (ui/) generated build output
+ui/.web/
+ui/*.db

@@ -13,7 +13,7 @@ make migrate                  # runs alembic upgrade head
 make seed                     # loads demo job + 5 candidates
 make run                      # FastAPI on :8000
 make worker                   # RQ worker (separate terminal)
-streamlit run ui/app.py       # optional UI on :8501
+make ui                       # optional UI on :3000 (Reflex dev server)
 ```
 
 Switch to cloud LLM at any time — no code change needed:
@@ -98,7 +98,7 @@ make eval       # precision@k against labeled CSV
 
 ## Excel / CSV format
 
-Same column layout for both — `.xlsx` and `.csv` are parsed with the same header-alias table (`app/pipeline/ingest.py`), so either format can be uploaded via `POST /jobs/{id}/candidates` or the Streamlit "Upload Candidates" page.
+Same column layout for both — `.xlsx` and `.csv` are parsed with the same header-alias table (`app/pipeline/ingest.py`), so either format can be uploaded via `POST /jobs/{id}/candidates` or the Reflex UI's "Upload Candidates" page.
 
 | Column | Required |
 |---|---|

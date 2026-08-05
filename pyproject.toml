@@ -29,7 +29,7 @@ dependencies = [
     "numpy",
     "instructor",
     "openai",
-    "streamlit",
+    "reflex>=0.9,<0.10",
     "aiosqlite",
     "greenlet",
 ]

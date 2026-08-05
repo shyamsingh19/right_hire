@@ -18,7 +18,7 @@ docker compose up -d mysql redis   # skip app/worker — no Dockerfile yet
 pip install -e ".[dev]"
 make run                      # FastAPI on :8001 (Makefile hardcodes this port, not :8000)
 make worker                   # RQ worker — separate terminal
-streamlit run ui/app.py       # optional UI on :8501 — reads config.ini [ui] api_base
+make ui                       # optional UI on :3000 (Reflex dev server) — reads config.ini [ui] api_base
 ```
 
 Skip `make migrate` — tables are created automatically via `Base.metadata.create_all` in `app/main.py`'s lifespan (dev-only convenience) until Alembic is wired up.
@@ -97,7 +97,14 @@ scripts/
   seed_demo.py       # creates demo job + 5 candidates in DB
   seed_batch_test.py # 1 job + 15 varied candidates for manual pipeline/LLM testing
   eval_harness.py    # precision@k evaluation
-ui/app.py            # Streamlit 3-page app — job pickers backed by GET /jobs
+ui/                  # Reflex app (Python → React/Tailwind) — 3 pages: Create Job, Upload Candidates, Results
+  rxconfig.py        # app_name="right_hire_ui"
+  right_hire_ui/
+    config.py        # API_BASE resolution (env var → config.ini [ui] api_base → localhost:8001)
+    api_client.py    # async httpx wrappers around the FastAPI backend
+    states/          # rx.State per page (AppState holds the shared GET /jobs cache)
+    components/      # theme, layout shell, glass-panel cards, verdict/status badges, job picker
+    pages/           # create_job.py, upload_candidates.py, results.py — job pickers backed by GET /jobs
 config.ini           # [ui] api_base — UI falls back to this if API_BASE env var unset
 TESTING_GUIDE.md      # manual end-to-end run against local GPU or cloud LLM backends
 ```
@@ -239,7 +246,7 @@ def test_something(fake_provider):
 
 `config.py` auto-derives `async_database_url` by replacing `pymysql` → `aiomysql` (or `sqlite` → `aiosqlite` for tests).
 
-The Streamlit UI is not configured through these — it reads `API_BASE` env var, falling back to `[ui] api_base` in `config.ini` (default `http://localhost:8001`).
+The Reflex UI is not configured through these — it reads `API_BASE` env var, falling back to `[ui] api_base` in `config.ini` (default `http://localhost:8001`).
 
 ---
 

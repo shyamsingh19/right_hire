@@ -92,9 +92,9 @@ The 15 are deliberately mixed:
 ```bash
 curl -s http://localhost:8001/jobs/<job_id>/results | python -m json.tool
 ```
-or the Streamlit UI:
+or the Reflex UI:
 ```bash
-streamlit run ui/app.py
+make ui   # cd ui && reflex run — dev server on :3000
 ```
 → "Results" page now has a job dropdown (no more pasting IDs) — pick the
 job you just seeded.
