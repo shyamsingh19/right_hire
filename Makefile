@@ -11,7 +11,7 @@ ui:
 	cd ui && reflex run
 
 worker:
-	set -a && . ./.env && set +a && rq worker --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats
+	set -a && . ./.env && set +a && rq worker --with-scheduler --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats
 
 migrate:
 	alembic upgrade head

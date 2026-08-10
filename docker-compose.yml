@@ -22,7 +22,7 @@ services:
       - .:/app
       - storage_data:/app/storage
     command: >
-      sh -c "rq worker --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats"
+      sh -c "rq worker --with-scheduler --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats"
 
 volumes:
   storage_data:

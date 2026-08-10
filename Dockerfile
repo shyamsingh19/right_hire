@@ -3,8 +3,12 @@
 FROM python:3.11-slim
 
 # tesseract-ocr: required by app/pipeline/parse.py's OCR fallback for scanned resumes.
+# supervisor: only used when the container is started with supervisord.conf's command
+# (see render.yaml) to run the API and the RQ worker as one process group — e.g. on
+# Render's free tier, which only offers Web Services, not Background Workers.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -15,6 +19,7 @@ COPY prompts ./prompts
 COPY grammars ./grammars
 COPY alembic ./alembic
 COPY alembic.ini ./
+COPY supervisord.conf ./
 
 RUN pip install --no-cache-dir -e .
 

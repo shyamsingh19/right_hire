@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: right-hire-api-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Overrides the Dockerfile's default CMD (plain uvicorn, used by docker-compose.yml
+    # for local dev) to run supervisord instead, which starts uvicorn AND the RQ worker
+    # as one process group. Render's free tier only offers Web Services, not Background
+    # Workers, so this is what keeps candidate processing free.
+    dockerCommand: sh -c "alembic upgrade head && supervisord -c /app/supervisord.conf -n"
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: LLM_BACKEND
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: AUTO_CREATE_TABLES
+        value: "false"
+      - key: CORS_ORIGINS
+        sync: false
+
+  - type: web
+    name: right-hire-ui
+    runtime: python
+    rootDir: ui
+    buildCommand: pip install -r requirements.txt
+    startCommand: reflex run --env prod --backend-host 0.0.0.0 --backend-port $PORT
+    plan: free
+    envVars:
+      - key: REFLEX_API_URL
+        fromService:
+          type: web
+          name: right-hire-api-worker
+          property: hostport
