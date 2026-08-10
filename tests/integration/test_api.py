@@ -442,6 +442,31 @@ def test_update_job_not_found(client):
     assert resp.status_code == 404
 
 
+def test_parse_jd_preview_does_not_create_job(client):
+    resp = client.post("/jobs/parse-jd", json={"jd_raw": "Need Python and SQL, 3+ years."})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "required_skills" in body
+    assert client.get("/jobs").json() == []  # no job row was created
+
+
+def test_create_job_with_jd_parsed_override(client):
+    override = {
+        "title": "Custom Title",
+        "required_skills": ["rust"],
+        "preferred_skills": [],
+        "min_yoe": 5.0,
+        "location": "Remote",
+        "must_haves": [],
+    }
+    resp = client.post(
+        "/jobs",
+        json={"title": "Eng", "jd_raw": "irrelevant", "jd_parsed_override": override},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["jd_parsed"]["required_skills"] == ["rust"]
+
+
 def test_update_job_cross_user_404(client, other_user_headers):
     create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
     job_id = create.json()["id"]

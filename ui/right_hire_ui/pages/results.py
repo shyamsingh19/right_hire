@@ -4,7 +4,7 @@ from typing import Any
 
 import reflex as rx
 
-from right_hire_ui.components.badges import status_badge, verdict_pill
+from right_hire_ui.components.badges import signal_chip, status_badge, verdict_pill
 from right_hire_ui.components.cards import section_card
 from right_hire_ui.components.empty_state import empty_state
 from right_hire_ui.components.job_picker import job_picker
@@ -76,6 +76,230 @@ def _rubric_row(row: dict) -> rx.Component:
 
 def _skill_tag(skill: str) -> rx.Component:
     return rx.badge(skill, variant="outline", color_scheme="blue", size="1")
+
+
+# ── Score distribution card ──────────────────────────────────────────────────
+
+
+def _histogram_bar(bucket: dict, max_count: rx.Var) -> rx.Component:
+    height_pct = rx.cond(max_count > 0, (bucket["count"].to(int) / max_count) * 100, 0)
+    return rx.vstack(
+        rx.box(
+            height=f"{height_pct}%",
+            min_height="2px",
+            width="100%",
+            background=rx.color("violet", 8),
+            border_radius="2px 2px 0 0",
+        ),
+        rx.text(bucket["count"].to(str), size="1", color=rx.color("gray", 10)),
+        rx.text(bucket["bucket"].to(str), size="1", color=rx.color("gray", 9)),
+        height="140px",
+        justify="end",
+        align="center",
+        spacing="1",
+        width="100%",
+    )
+
+
+def _score_distribution_card() -> rx.Component:
+    stats = ResultsState.batch_stats
+    histogram = stats["histogram"].to(list[dict])
+    max_count = ResultsState.max_histogram_count
+    return rx.cond(
+        ResultsState.is_loading_stats,
+        rx.center(rx.spinner(), padding="2em"),
+        rx.cond(
+            histogram.length() > 0,
+            rx.vstack(
+                rx.hstack(
+                    rx.text("Score distribution", weight="bold", size="3"),
+                    rx.spacer(),
+                    rx.text(
+                        stats["evaluated"].to(str)
+                        + " evaluated of "
+                        + stats["total_candidates"].to(str)
+                        + " candidates",
+                        size="1",
+                        color=rx.color("gray", 10),
+                    ),
+                    width="100%",
+                    align="center",
+                ),
+                rx.hstack(
+                    rx.foreach(histogram, lambda b: _histogram_bar(b, max_count)),
+                    spacing="2",
+                    align="end",
+                    width="100%",
+                ),
+                rx.divider(),
+                rx.text(
+                    "Recalibrate Fit / Maybe thresholds",
+                    weight="medium",
+                    size="2",
+                ),
+                rx.grid(
+                    rx.vstack(
+                        rx.hstack(
+                            rx.text("Fit threshold", size="2"),
+                            rx.spacer(),
+                            rx.badge(
+                                ResultsState.draft_fit_threshold.to_string(),
+                                color_scheme="green",
+                                variant="soft",
+                            ),
+                            width="100%",
+                        ),
+                        rx.slider(
+                            value=[ResultsState.draft_fit_threshold],
+                            on_change=ResultsState.set_draft_fit_threshold,
+                            min=0,
+                            max=1,
+                            step=0.05,
+                            width="100%",
+                        ),
+                        width="100%",
+                        spacing="1",
+                    ),
+                    rx.vstack(
+                        rx.hstack(
+                            rx.text("Maybe threshold", size="2"),
+                            rx.spacer(),
+                            rx.badge(
+                                ResultsState.draft_maybe_threshold.to_string(),
+                                color_scheme="amber",
+                                variant="soft",
+                            ),
+                            width="100%",
+                        ),
+                        rx.slider(
+                            value=[ResultsState.draft_maybe_threshold],
+                            on_change=ResultsState.set_draft_maybe_threshold,
+                            min=0,
+                            max=1,
+                            step=0.05,
+                            width="100%",
+                        ),
+                        width="100%",
+                        spacing="1",
+                    ),
+                    columns="2",
+                    width="100%",
+                    spacing="4",
+                ),
+                rx.button(
+                    rx.icon("sliders-horizontal", size=14),
+                    "Apply thresholds",
+                    on_click=ResultsState.recalibrate_thresholds,
+                    loading=ResultsState.is_recalibrating,
+                    size="2",
+                    variant="soft",
+                    width="fit-content",
+                ),
+                spacing="3",
+                width="100%",
+                padding="1em",
+                border=f"1px solid {rx.color('gray', 5)}",
+                border_radius="var(--radius-3)",
+            ),
+            rx.fragment(),
+        ),
+    )
+
+
+# ── Candidate inspector (split-screen audit view) ────────────────────────────
+
+
+def _inspector_left(row: dict) -> rx.Component:
+    return rx.vstack(
+        rx.hstack(
+            verdict_pill(row["verdict"].to(str)),
+            rx.text(row["score_display"].to(str), size="3", weight="medium"),
+            spacing="2",
+            align="center",
+        ),
+        rx.cond(
+            row["summary"].to(str) != "",
+            rx.callout(row["summary"].to(str), icon="info", color_scheme="blue", size="1"),
+        ),
+        rx.hstack(
+            rx.foreach(
+                row["matched_skills"].to(list[str]),
+                lambda s: signal_chip(s, "match"),
+            ),
+            wrap="wrap",
+            gap="1",
+        ),
+        rx.cond(
+            row["breakdown_rows"].to(list[dict[str, Any]]).length() > 0,
+            _score_breakdown_table(row["breakdown_rows"].to(list[dict[str, Any]])),
+        ),
+        rx.cond(
+            row["rubric_rows"].to(list[dict[str, Any]]).length() > 0,
+            rx.vstack(
+                rx.text("Rubric scores", weight="medium", size="2"),
+                rx.foreach(row["rubric_rows"].to(list[dict[str, Any]]), _rubric_row),
+                align="start",
+                spacing="2",
+                width="100%",
+            ),
+        ),
+        rx.text(f"Model: {row['model_used'].to(str)}", size="1", color=rx.color("gray", 10)),
+        spacing="3",
+        width="100%",
+        align="start",
+        overflow_y="auto",
+        height="100%",
+    )
+
+
+def _inspector_right() -> rx.Component:
+    return rx.vstack(
+        rx.text("Original resume", weight="medium", size="2"),
+        rx.box(
+            rx.text(
+                ResultsState.inspect_resume_text,
+                size="2",
+                white_space="pre-wrap",
+                font_family="var(--code-font-family)",
+            ),
+            padding="1em",
+            border=f"1px solid {rx.color('gray', 5)}",
+            border_radius="var(--radius-3)",
+            background=rx.color("gray", 2),
+            width="100%",
+            height="100%",
+            overflow_y="auto",
+        ),
+        spacing="2",
+        width="100%",
+        height="100%",
+    )
+
+
+def _candidate_inspector_modal() -> rx.Component:
+    row = ResultsState.inspect_row
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title(row["name"].to(str)),
+            rx.grid(
+                _inspector_left(row),
+                _inspector_right(),
+                columns="2",
+                spacing="4",
+                width="100%",
+                height="60vh",
+            ),
+            rx.flex(
+                rx.dialog.close(rx.button("Close", variant="soft", color_scheme="gray")),
+                justify="end",
+                margin_top="1em",
+            ),
+            max_width="90vw",
+            width="1100px",
+        ),
+        open=ResultsState.inspect_candidate_id != "",
+        on_open_change=lambda _open: ResultsState.close_inspector(),
+    )
 
 
 # ── Result item ───────────────────────────────────────────────────────────────
@@ -232,12 +456,41 @@ def _delete_candidate_dialog(row: dict) -> rx.Component:
     )
 
 
+def _row_actions(row: dict) -> rx.Component:
+    is_error = row["is_error"].to(bool)
+    candidate_id = row["candidate_id"].to(str)
+    return rx.hstack(
+        rx.cond(
+            is_error,
+            rx.button(
+                rx.icon("file-up", size=12),
+                "Attach Resume PDF",
+                size="1",
+                variant="soft",
+                color_scheme="orange",
+                on_click=ResultsState.set_resume_target_id(candidate_id),
+            ),
+        ),
+        rx.button(
+            rx.icon("scan-search", size=12),
+            "Inspect",
+            size="1",
+            variant="soft",
+            on_click=ResultsState.open_inspector(candidate_id),
+        ),
+        rx.spacer(),
+        _delete_candidate_dialog(row),
+        width="100%",
+        spacing="2",
+    )
+
+
 def _result_item(row: dict) -> rx.Component:
     return rx.accordion.item(
         header=_result_header(row),
         content=rx.vstack(
             _result_content(row),
-            rx.hstack(rx.spacer(), _delete_candidate_dialog(row), width="100%"),
+            _row_actions(row),
             spacing="2",
             width="100%",
         ),
@@ -449,6 +702,7 @@ def results_page() -> rx.Component:
                         width="fit-content",
                     ),
                     _processing_status_banner(),
+                    rx.cond(ResultsState.has_loaded, _score_distribution_card()),
                     rx.cond(
                         ResultsState.load_error != "",
                         rx.callout(
@@ -486,4 +740,5 @@ def results_page() -> rx.Component:
                 ),
             ),
         ),
+        _candidate_inspector_modal(),
     )

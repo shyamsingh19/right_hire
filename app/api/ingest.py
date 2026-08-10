@@ -110,9 +110,7 @@ async def cancel_pending_candidates(
         return CancelPendingResponse(cancelled_count=0)
 
     await db.execute(
-        update(Candidate)
-        .where(Candidate.id.in_(pending_ids))
-        .values(status=CandidateStatus.failed)
+        update(Candidate).where(Candidate.id.in_(pending_ids)).values(status=CandidateStatus.failed)
     )
     for cid in pending_ids:
         db.add(
@@ -124,7 +122,9 @@ async def cancel_pending_candidates(
             )
         )
     await db.commit()
-    logger.info("User %s cancelled %d pending candidates for job %s", user.id, len(pending_ids), job_id)
+    logger.info(
+        "User %s cancelled %d pending candidates for job %s", user.id, len(pending_ids), job_id
+    )
     return CancelPendingResponse(cancelled_count=len(pending_ids))
 
 

@@ -37,11 +37,19 @@ class JudgeOutput(BaseModel):
 # ── Request schemas ──────────────────────────────────────────────────────────
 
 
+class JdParseRequest(BaseModel):
+    jd_raw: str
+
+
 class JobCreate(BaseModel):
     title: str
     jd_raw: str
     weights: dict[str, float] | None = None
     thresholds: dict[str, float] | None = None
+    # Set by the create-job wizard after the recruiter reviews/edits the auto-parsed
+    # criteria in the Step 1 -> Step 2 preview (POST /jobs/parse-jd). When present, this
+    # is stored as-is instead of re-parsing jd_raw, so wizard edits aren't discarded.
+    jd_parsed_override: ParsedJD | None = None
 
 
 class JobUpdate(BaseModel):
@@ -115,6 +123,7 @@ class CandidateResponse(BaseModel):
     yoe: float | None = None
     location: str | None = None
     resume_url: str | None = None
+    resume_text: str | None = None
     status: str
     parsed: dict | None = None
     created_at: datetime

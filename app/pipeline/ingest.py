@@ -101,9 +101,7 @@ def _normalize_header(raw: str) -> str:
     return _COL_MAP.get(raw.strip().lower(), raw.strip().lower().replace(" ", "_"))
 
 
-def apply_column_mapping(
-    rows: list[dict], mapping: dict[str, str | None]
-) -> list[dict]:
+def apply_column_mapping(rows: list[dict], mapping: dict[str, str | None]) -> list[dict]:
     """Re-key rows using an explicit {canonical_field: raw_header} mapping."""
     reverse = {v: k for k, v in mapping.items() if v is not None}
     result = []

@@ -80,19 +80,61 @@ async def get_jobs(api_key: str) -> list[dict]:
         return resp.json()
 
 
-async def create_job(
-    api_key: str, title: str, jd_raw: str, fit_threshold: float, maybe_threshold: float
-) -> dict:
+async def parse_jd_preview(api_key: str, jd_raw: str) -> dict:
+    """Pre-flight parse for the create-job wizard — doesn't create a job or spend credits."""
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            f"{API_BASE}/jobs",
+            f"{API_BASE}/jobs/parse-jd",
             headers=_headers(api_key),
-            json={
-                "title": title,
-                "jd_raw": jd_raw,
-                "thresholds": {"fit": fit_threshold, "maybe": maybe_threshold},
-            },
+            json={"jd_raw": jd_raw},
             timeout=60,
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def create_job(
+    api_key: str,
+    title: str,
+    jd_raw: str,
+    fit_threshold: float,
+    maybe_threshold: float,
+    weights: dict | None = None,
+    jd_parsed_override: dict | None = None,
+) -> dict:
+    body: dict = {
+        "title": title,
+        "jd_raw": jd_raw,
+        "thresholds": {"fit": fit_threshold, "maybe": maybe_threshold},
+    }
+    if weights is not None:
+        body["weights"] = weights
+    if jd_parsed_override is not None:
+        body["jd_parsed_override"] = jd_parsed_override
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{API_BASE}/jobs", headers=_headers(api_key), json=body, timeout=60
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def update_job_thresholds(api_key: str, job_id: str, thresholds: dict) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.patch(
+            f"{API_BASE}/jobs/{job_id}",
+            headers=_headers(api_key),
+            json={"thresholds": thresholds},
+            timeout=30,
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def get_job_stats(api_key: str, job_id: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{API_BASE}/jobs/{job_id}/stats", headers=_headers(api_key), timeout=30
         )
         await _raise_for_status(resp)
         return resp.json()

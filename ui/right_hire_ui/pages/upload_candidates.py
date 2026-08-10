@@ -121,12 +121,8 @@ def upload_candidates_page() -> rx.Component:
                             rx.upload(
                                 rx.vstack(
                                     rx.icon("cloud-upload", size=28, color=rx.color("gray", 9)),
-                                    rx.text(
-                                        "Drag & drop, or click to select a file", size="2"
-                                    ),
-                                    rx.text(
-                                        ".xlsx or .csv", size="1", color=rx.color("gray", 10)
-                                    ),
+                                    rx.text("Drag & drop, or click to select a file", size="2"),
+                                    rx.text(".xlsx or .csv", size="1", color=rx.color("gray", 10)),
                                     align="center",
                                     spacing="1",
                                 ),

@@ -11,9 +11,21 @@ from app.llm.base import LLMProvider
 from app.llm.factory import get_provider
 from app.models import Candidate, Evaluation, Job, User
 from app.pipeline.parse import parse_jd
-from app.schemas import JobCreate, JobResponse, JobUpdate
+from app.schemas import JdParseRequest, JobCreate, JobResponse, JobUpdate, ParsedJD
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+@router.post("/parse-jd", response_model=ParsedJD)
+async def parse_jd_preview(
+    body: JdParseRequest,
+    user: User = Depends(get_current_user),
+    provider: LLMProvider = Depends(get_provider),
+):
+    """Pre-flight JD parse for the job creation wizard — lets a recruiter review and
+    edit extracted skills/YOE/thresholds before a Job row (and its immutable jd_parsed
+    snapshot) is created. Does not touch the DB or spend credits."""
+    return parse_jd(body.jd_raw, provider)
 
 
 @router.post("", response_model=JobResponse, status_code=201)
@@ -23,7 +35,11 @@ async def create_job(
     user: User = Depends(get_current_user),
     provider: LLMProvider = Depends(get_provider),
 ):
-    parsed_jd = parse_jd(body.jd_raw, provider)
+    parsed_jd = (
+        body.jd_parsed_override
+        if body.jd_parsed_override is not None
+        else parse_jd(body.jd_raw, provider)
+    )
 
     job = Job(
         user_id=user.id,

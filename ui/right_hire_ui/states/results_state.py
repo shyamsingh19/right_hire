@@ -117,6 +117,84 @@ class ResultsState(AppState):
     is_attaching: bool = False
     is_cancelling: bool = False
 
+    batch_stats: dict = {}  # noqa: RUF012 — BatchStats.model_dump()
+    is_loading_stats: bool = False
+    draft_fit_threshold: float = 0.70
+    draft_maybe_threshold: float = 0.40
+    is_recalibrating: bool = False
+
+    inspect_candidate_id: str = ""
+
+    @rx.var
+    def inspect_row(self) -> dict:
+        for row in self.display_rows:
+            if row["candidate_id"] == self.inspect_candidate_id:
+                return row
+        return {}
+
+    @rx.var
+    def inspect_resume_text(self) -> str:
+        for item in self.results:
+            if item["candidate"]["id"] == self.inspect_candidate_id:
+                return item["candidate"].get("resume_text") or "No resume text available."
+        return ""
+
+    def open_inspector(self, candidate_id: str) -> None:
+        self.inspect_candidate_id = candidate_id
+
+    def close_inspector(self) -> None:
+        self.inspect_candidate_id = ""
+
+    def set_draft_fit_threshold(self, value: list[float]) -> None:
+        self.draft_fit_threshold = value[0]
+
+    def set_draft_maybe_threshold(self, value: list[float]) -> None:
+        self.draft_maybe_threshold = value[0]
+
+    @rx.var
+    def max_histogram_count(self) -> int:
+        buckets = self.batch_stats.get("histogram") or []
+        return max((b.get("count", 0) for b in buckets), default=0)
+
+    async def load_stats(self):
+        if not self.selected_job_id:
+            return
+        self.is_loading_stats = True
+        yield
+        try:
+            stats = await api_client.get_job_stats(self.api_key, self.selected_job_id)
+            self.batch_stats = stats
+            current = stats.get("current_thresholds") or {}
+            self.draft_fit_threshold = current.get("fit", 0.70)
+            self.draft_maybe_threshold = current.get("maybe", 0.40)
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Couldn't load score distribution: {e}")
+        finally:
+            self.is_loading_stats = False
+
+    async def recalibrate_thresholds(self):
+        """Applies the draft Fit/Maybe sliders via PATCH /jobs/{id}, then reloads both
+        the stats card and results so verdicts reflect the new cutoffs immediately."""
+        if not self.selected_job_id:
+            return
+        if self.draft_maybe_threshold >= self.draft_fit_threshold:
+            yield rx.toast.error("Maybe threshold must be lower than Fit threshold.")
+            return
+        self.is_recalibrating = True
+        yield
+        try:
+            await api_client.update_job_thresholds(
+                self.api_key,
+                self.selected_job_id,
+                {"fit": self.draft_fit_threshold, "maybe": self.draft_maybe_threshold},
+            )
+            yield rx.toast.success("Thresholds updated.")
+            yield ResultsState.load_stats
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Recalibration failed: {e}")
+        finally:
+            self.is_recalibrating = False
+
     @rx.var
     def pending_count(self) -> int:
         return sum(1 for r in self.results if r["candidate"]["status"] == "pending")
@@ -176,9 +254,7 @@ class ResultsState(AppState):
         self.is_cancelling = True
         yield
         try:
-            result = await api_client.cancel_pending_candidates(
-                self.api_key, self.selected_job_id
-            )
+            result = await api_client.cancel_pending_candidates(self.api_key, self.selected_job_id)
             n = result.get("cancelled_count", 0)
             if n:
                 yield rx.toast.info(f"Cancelled {n} pending candidate{'s' if n != 1 else ''}.")
@@ -277,6 +353,7 @@ class ResultsState(AppState):
             self.has_loaded = True
 
         yield ResultsState.poll_for_updates
+        yield ResultsState.load_stats
 
     async def load_more(self):
         if not self.selected_job_id or not self.has_more:

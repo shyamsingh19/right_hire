@@ -75,8 +75,7 @@ class UploadState(AppState):
             self.raw_columns = result["columns"]
             # Convert None values to empty string for Reflex state compatibility
             self.mapping = {
-                field: (result["mapping"].get(field) or "")
-                for field in CANONICAL_FIELDS
+                field: (result["mapping"].get(field) or "") for field in CANONICAL_FIELDS
             }
             self.show_mapping = True
         except (httpx.HTTPError, api_client.ApiError) as e:
@@ -95,10 +94,7 @@ class UploadState(AppState):
 
         try:
             # Convert empty strings back to None before sending
-            final_mapping = {
-                field: (col if col else None)
-                for field, col in self.mapping.items()
-            }
+            final_mapping = {field: (col if col else None) for field, col in self.mapping.items()}
             result = await api_client.upload_candidates(
                 self.api_key,
                 self.selected_job_id,
