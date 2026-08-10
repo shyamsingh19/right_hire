@@ -173,7 +173,7 @@ class ResultsState(AppState):
             else:
                 yield rx.toast.info("No pending candidates to cancel.")
             # Refresh so the UI reflects the new 'failed' statuses immediately
-            await self.load_results()
+            yield ResultsState.load_results
         except (httpx.HTTPError, api_client.ApiError) as e:
             yield rx.toast.error(f"Cancel failed: {e}")
         finally:
