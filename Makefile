@@ -5,13 +5,13 @@ install:
 	pip install -e ".[dev]"
 
 run:
-	uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+	set -a && . ./.env && set +a && uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 
 ui:
 	cd ui && reflex run
 
 worker:
-	rq worker --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats
+	set -a && . ./.env && set +a && rq worker --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats
 
 migrate:
 	alembic upgrade head
