@@ -44,17 +44,21 @@ def _credits_block() -> rx.Component:
             rx.icon("coins", size=14, color=rx.color("amber", 9)),
             rx.text("Credits", size="1", color=rx.color("gray", 11)),
             rx.spacer(),
-            rx.badge(
-                AppState.credits.to_string(),
-                variant="soft",
-                color_scheme=rx.cond(out_of_credits, "red", "grass"),
-                size="1",
+            rx.cond(
+                AppState.is_loading_account,
+                rx.spinner(size="1"),
+                rx.badge(
+                    AppState.credits.to_string(),
+                    variant="soft",
+                    color_scheme=rx.cond(out_of_credits, "red", "grass"),
+                    size="1",
+                ),
             ),
             align="center",
             width="100%",
         ),
         rx.cond(
-            out_of_credits,
+            ~AppState.is_loading_account & out_of_credits,
             rx.text(
                 "Out of credits — uploads will be rejected.",
                 size="1",
@@ -91,8 +95,12 @@ def _account_widget() -> rx.Component:
     """Every API call needs an X-API-Key — this is the only place a user gets or pastes one."""
     signed_in = rx.vstack(
         rx.hstack(
-            rx.icon("key-round", size=14, color=rx.color("grass", 9)),
-            rx.text("Connected", size="1", color=rx.color("gray", 11)),
+            rx.icon("user", size=14, color=rx.color("grass", 9)),
+            rx.cond(
+                AppState.user_email != "",
+                rx.text(AppState.user_email, size="1", color=rx.color("gray", 11), no_of_lines=1),
+                rx.text("Connected", size="1", color=rx.color("gray", 11)),
+            ),
             rx.spacer(),
             rx.link("Log out", on_click=AppState.log_out, size="1", color=rx.color("gray", 9)),
             align="center",

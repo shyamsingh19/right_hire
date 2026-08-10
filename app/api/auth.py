@@ -77,6 +77,12 @@ class RotateKeyResponse(BaseModel):
     api_key: str  # new key — shown once; the old key stops working immediately
 
 
+@router.get("/me")
+async def get_me(user: User = Depends(get_current_user)):
+    """Return the email and credit balance for the authenticated caller."""
+    return {"email": user.email, "credits": user.credits}
+
+
 @router.post("/rotate-key", response_model=RotateKeyResponse)
 async def rotate_key(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     """Issue a new API key for the caller, invalidating the current one.

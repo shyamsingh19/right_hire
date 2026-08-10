@@ -229,7 +229,12 @@ async def list_results(
     out: list[CandidateWithEval] = []
     for c in candidates:
         eval_obj: Evaluation | None = (
-            await db.execute(select(Evaluation).where(Evaluation.candidate_id == c.id))
+            await db.execute(
+                select(Evaluation)
+                .where(Evaluation.candidate_id == c.id)
+                .order_by(Evaluation.id.desc())
+                .limit(1)
+            )
         ).scalar_one_or_none()
 
         if verdict and (not eval_obj or eval_obj.verdict != verdict):
@@ -270,7 +275,12 @@ async def export_results_csv(
     )
     for c in candidates:
         eval_obj: Evaluation | None = (
-            await db.execute(select(Evaluation).where(Evaluation.candidate_id == c.id))
+            await db.execute(
+                select(Evaluation)
+                .where(Evaluation.candidate_id == c.id)
+                .order_by(Evaluation.id.desc())
+                .limit(1)
+            )
         ).scalar_one_or_none()
         if verdict and (not eval_obj or eval_obj.verdict != verdict):
             continue

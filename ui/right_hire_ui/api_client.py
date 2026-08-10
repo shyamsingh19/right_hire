@@ -39,6 +39,13 @@ async def signup(email: str) -> dict:
         return resp.json()
 
 
+async def get_me(api_key: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{API_BASE}/auth/me", headers=_headers(api_key), timeout=10)
+        await _raise_for_status(resp)
+        return resp.json()
+
+
 async def rotate_key(api_key: str) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
