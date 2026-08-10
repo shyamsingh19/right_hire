@@ -108,7 +108,7 @@ def _histogram_bar(bucket: dict, max_count: rx.Var) -> rx.Component:
 
 def _score_distribution_card() -> rx.Component:
     stats = ResultsState.batch_stats
-    histogram = stats["histogram"].to(list[dict])
+    histogram = ResultsState.histogram
     max_count = ResultsState.max_histogram_count
     return rx.cond(
         ResultsState.is_loading_stats,

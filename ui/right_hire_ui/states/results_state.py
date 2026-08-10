@@ -176,8 +176,12 @@ class ResultsState(AppState):
         self.draft_maybe_threshold = value[0]
 
     @rx.var
+    def histogram(self) -> list[dict]:
+        return self.batch_stats.get("histogram") or []
+
+    @rx.var
     def max_histogram_count(self) -> int:
-        buckets = self.batch_stats.get("histogram") or []
+        buckets = self.histogram
         return max((b.get("count", 0) for b in buckets), default=0)
 
     async def load_stats(self):
