@@ -31,4 +31,5 @@ config = rx.Config(
     app_name="right_hire_ui",
     **({"api_url": _api_url} if _api_url else {}),
     cors_allowed_origins=_cors_allowed_origins,
+    show_built_with_reflex=False,
 )

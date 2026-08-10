@@ -16,7 +16,6 @@ from right_hire_ui.states.upload_state import UploadState
 app = rx.App(
     theme=get_theme(),
     stylesheets=STYLESHEETS,
-    show_built_with_reflex=False,
     toaster=rx.toast.provider(
         position="bottom-right",
         close_button=True,
