@@ -13,14 +13,20 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+CANONICAL_FIELDS = ["name", "email", "resume_url", "yoe", "location"]
+
 # Canonical column name mapping — covers common spreadsheet headers
 _COL_MAP: dict[str, str] = {
     "name": "name",
     "full name": "name",
     "candidate name": "name",
+    "applicant": "name",
+    "applicant name": "name",
     "email": "email",
     "email address": "email",
     "e-mail": "email",
+    "mail": "email",
+    "contact email": "email",
     "resume_url": "resume_url",
     "resume url": "resume_url",
     "cv url": "resume_url",
@@ -28,18 +34,86 @@ _COL_MAP: dict[str, str] = {
     "resume_drive_link": "resume_url",
     "drive link": "resume_url",
     "google drive link": "resume_url",
+    "cv link": "resume_url",
+    "portfolio": "resume_url",
+    "attach your cv": "resume_url",
+    "attach cv": "resume_url",
+    "upload cv": "resume_url",
+    "upload resume": "resume_url",
     "yoe": "yoe",
     "years of experience": "yoe",
     "experience": "yoe",
     "years": "yoe",
+    "exp": "yoe",
+    "total experience": "yoe",
     "location": "location",
     "city": "location",
     "city/country": "location",
+    "country": "location",
+    "address": "location",
+    "region": "location",
+    "place": "location",
 }
+
+# Keyword hints used for fuzzy fallback when exact match fails
+_FIELD_KEYWORDS: dict[str, list[str]] = {
+    "name": ["name", "candidate", "applicant"],
+    "email": ["email", "mail", "e-mail"],
+    "resume_url": ["resume", "cv", "portfolio", "link", "url", "attach", "drive", "upload"],
+    "yoe": ["year", "exp", "yoe"],
+    "location": ["location", "city", "country", "place", "address", "region"],
+}
+
+
+def detect_column_mapping(raw_headers: list[str]) -> dict[str, str | None]:
+    """Return {canonical_field: raw_header_or_None} for each known field.
+
+    First tries exact lookup in _COL_MAP, then falls back to keyword substring
+    matching. A field is left None when no column matches.
+    """
+    mapping: dict[str, str | None] = {f: None for f in CANONICAL_FIELDS}
+    claimed: set[str] = set()
+
+    # Pass 1: exact matches
+    for raw in raw_headers:
+        canonical = _COL_MAP.get(raw.strip().lower())
+        if canonical and mapping[canonical] is None and raw not in claimed:
+            mapping[canonical] = raw
+            claimed.add(raw)
+
+    # Pass 2: keyword fuzzy for unmatched fields
+    for field, keywords in _FIELD_KEYWORDS.items():
+        if mapping[field] is not None:
+            continue
+        for raw in raw_headers:
+            if raw in claimed:
+                continue
+            lower = raw.strip().lower()
+            if any(kw in lower for kw in keywords):
+                mapping[field] = raw
+                claimed.add(raw)
+                break
+
+    return mapping
 
 
 def _normalize_header(raw: str) -> str:
     return _COL_MAP.get(raw.strip().lower(), raw.strip().lower().replace(" ", "_"))
+
+
+def apply_column_mapping(
+    rows: list[dict], mapping: dict[str, str | None]
+) -> list[dict]:
+    """Re-key rows using an explicit {canonical_field: raw_header} mapping."""
+    reverse = {v: k for k, v in mapping.items() if v is not None}
+    result = []
+    for row in rows:
+        new_row: dict = {}
+        for raw_key, value in row.items():
+            canonical = reverse.get(raw_key, raw_key)
+            new_row[canonical] = value
+        result.append(new_row)
+    return result
 
 
 def parse_excel(file_bytes: bytes) -> list[dict]:
@@ -68,6 +142,25 @@ def parse_excel(file_bytes: bytes) -> list[dict]:
 
     wb.close()
     return result
+
+
+def parse_excel_raw(file_bytes: bytes) -> tuple[list[str], list[dict]]:
+    """Return (raw_headers, rows_keyed_by_raw_header) without normalising."""
+    wb = openpyxl.load_workbook(filename=io.BytesIO(file_bytes), read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not rows:
+        return [], []
+    raw_headers = [str(h) if h is not None else "" for h in rows[0]]
+    result = []
+    for row in rows[1:]:
+        if all(v is None for v in row):
+            continue
+        record = {h: (str(v) if v is not None else "") for h, v in zip(raw_headers, row)}
+        if any(v for v in record.values()):
+            result.append(record)
+    return raw_headers, result
 
 
 def parse_csv(file_bytes: bytes) -> list[dict]:
@@ -99,6 +192,24 @@ def parse_csv(file_bytes: bytes) -> list[dict]:
             result.append(record)
 
     return result
+
+
+def parse_csv_raw(file_bytes: bytes) -> tuple[list[str], list[dict]]:
+    """Return (raw_headers, rows_keyed_by_raw_header) without normalising."""
+    text = file_bytes.decode("utf-8-sig")
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        return [], []
+    raw_headers = [h.strip() for h in rows[0]]
+    result = []
+    for row in rows[1:]:
+        if all(not v.strip() for v in row):
+            continue
+        record = {h: v.strip() for h, v in zip(raw_headers, row)}
+        if any(v for v in record.values()):
+            result.append(record)
+    return raw_headers, result
 
 
 def _is_drive_url(url: str) -> bool:

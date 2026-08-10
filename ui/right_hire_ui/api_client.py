@@ -91,14 +91,50 @@ async def create_job(
         return resp.json()
 
 
-async def upload_candidates(
+async def cancel_pending_candidates(api_key: str, job_id: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{API_BASE}/jobs/{job_id}/candidates/cancel-pending",
+            headers=_headers(api_key),
+            timeout=15,
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def preview_candidates(
     api_key: str, job_id: str, filename: str, data: bytes, content_type: str
 ) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            f"{API_BASE}/jobs/{job_id}/candidates",
+            f"{API_BASE}/jobs/{job_id}/candidates/preview",
             headers=_headers(api_key),
             files={"file": (filename, data, content_type)},
+            timeout=30,
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def upload_candidates(
+    api_key: str,
+    job_id: str,
+    filename: str,
+    data: bytes,
+    content_type: str,
+    column_mapping: dict | None = None,
+) -> dict:
+    import json as _json
+
+    async with httpx.AsyncClient() as client:
+        data_fields: dict = {"file": (filename, data, content_type)}
+        extra: dict = {}
+        if column_mapping is not None:
+            extra["column_mapping"] = (None, _json.dumps(column_mapping), "text/plain")
+        resp = await client.post(
+            f"{API_BASE}/jobs/{job_id}/candidates",
+            headers=_headers(api_key),
+            files={**data_fields, **extra},
             timeout=30,
         )
         await _raise_for_status(resp)

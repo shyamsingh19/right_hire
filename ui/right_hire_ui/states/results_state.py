@@ -115,6 +115,27 @@ class ResultsState(AppState):
     resume_target_id: str = ""
     is_exporting: bool = False
     is_attaching: bool = False
+    is_cancelling: bool = False
+
+    @rx.var
+    def pending_count(self) -> int:
+        return sum(1 for r in self.results if r["candidate"]["status"] == "pending")
+
+    @rx.var
+    def processing_count(self) -> int:
+        return sum(1 for r in self.results if r["candidate"]["status"] == "processing")
+
+    @rx.var
+    def done_count(self) -> int:
+        return sum(1 for r in self.results if r["candidate"]["status"] == "done")
+
+    @rx.var
+    def total_count(self) -> int:
+        return len(self.results)
+
+    @rx.var
+    def has_active(self) -> bool:
+        return self.pending_count > 0 or self.processing_count > 0
 
     def set_selected_job_id(self, value: str) -> None:
         self.selected_job_id = value

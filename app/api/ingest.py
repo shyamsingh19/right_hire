@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from pathlib import Path
 
 import redis as redis_lib
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from rq import Queue, Retry
 from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,8 +16,16 @@ from app.auth import get_current_user
 from app.config import settings
 from app.db import get_db
 from app.models import Candidate, CandidateStatus, Evaluation, User
-from app.pipeline.ingest import parse_csv, parse_excel, save_resume
-from app.schemas import BulkIngestResponse
+from app.pipeline.ingest import (
+    apply_column_mapping,
+    detect_column_mapping,
+    parse_csv,
+    parse_csv_raw,
+    parse_excel,
+    parse_excel_raw,
+    save_resume,
+)
+from app.schemas import BulkIngestResponse, CancelPendingResponse, ColumnPreviewResponse
 
 router = APIRouter(prefix="/jobs", tags=["ingest"])
 logger = logging.getLogger(__name__)
@@ -67,23 +76,67 @@ def _enqueue_candidates(
     return queued, failed
 
 
-@router.post("/{job_id}/candidates", response_model=BulkIngestResponse, status_code=202)
-async def ingest_candidates(
+@router.post("/{job_id}/candidates/cancel-pending", response_model=CancelPendingResponse)
+async def cancel_pending_candidates(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Mark all pending candidates for this job as cancelled (failed with a user-cancel reason).
+
+    Only affects candidates still in 'pending' status — those already being processed by a
+    worker are mid-flight and cannot be interrupted. Credits are NOT refunded since the
+    candidates were already deducted on ingest.
+    """
+    from sqlalchemy import select as sa_select
+
+    await _get_owned_job(db, job_id, user)
+
+    result = await db.execute(
+        sa_select(Candidate.id).where(
+            Candidate.job_id == job_id,
+            Candidate.status == CandidateStatus.pending,
+        )
+    )
+    pending_ids = [row[0] for row in result.all()]
+
+    if not pending_ids:
+        return CancelPendingResponse(cancelled_count=0)
+
+    await db.execute(
+        update(Candidate)
+        .where(Candidate.id.in_(pending_ids))
+        .values(status=CandidateStatus.failed)
+    )
+    for cid in pending_ids:
+        db.add(
+            Evaluation(
+                candidate_id=cid,
+                job_id=job_id,
+                reasons={"error": "Cancelled by user before processing started"},
+                model_used="cancelled",
+            )
+        )
+    await db.commit()
+    logger.info("User %s cancelled %d pending candidates for job %s", user.id, len(pending_ids), job_id)
+    return CancelPendingResponse(cancelled_count=len(pending_ids))
+
+
+@router.post("/{job_id}/candidates/preview", response_model=ColumnPreviewResponse)
+async def preview_columns(
     job_id: str,
     file: UploadFile,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Parse file headers and return auto-detected column mapping + sample rows.
+
+    No candidates are created; this is a read-only preview step before the user
+    confirms the mapping and calls POST /{job_id}/candidates.
+    """
     await _get_owned_job(db, job_id, user)
 
     filename = file.filename or ""
-    if filename.endswith(".xlsx"):
-        parser = parse_excel
-    elif filename.endswith(".csv"):
-        parser = parse_csv
-    else:
-        raise HTTPException(status_code=400, detail="Only .xlsx or .csv files are accepted")
-
     content = await file.read()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -93,7 +146,69 @@ async def ingest_candidates(
     _validate_sheet_signature(filename, content)
 
     try:
-        rows = parser(content)
+        if filename.endswith(".xlsx"):
+            raw_headers, raw_rows = parse_excel_raw(content)
+        elif filename.endswith(".csv"):
+            raw_headers, raw_rows = parse_csv_raw(content)
+        else:
+            raise HTTPException(status_code=400, detail="Only .xlsx or .csv files are accepted")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}") from exc
+
+    mapping = detect_column_mapping(raw_headers)
+    return ColumnPreviewResponse(
+        columns=raw_headers,
+        mapping=mapping,
+        sample_rows=raw_rows[:3],
+    )
+
+
+@router.post("/{job_id}/candidates", response_model=BulkIngestResponse, status_code=202)
+async def ingest_candidates(
+    job_id: str,
+    file: UploadFile,
+    column_mapping: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _get_owned_job(db, job_id, user)
+
+    filename = file.filename or ""
+    content = await file.read()
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413, detail=f"File exceeds max upload size ({settings.max_upload_mb} MB)"
+        )
+    _validate_sheet_signature(filename, content)
+
+    # Parse explicit mapping from form field (sent by the UI after the preview step)
+    explicit_mapping: dict[str, str | None] | None = None
+    if column_mapping:
+        try:
+            explicit_mapping = json.loads(column_mapping)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail="Invalid column_mapping JSON") from exc
+
+    try:
+        if filename.endswith(".xlsx"):
+            if explicit_mapping is not None:
+                _, raw_rows = parse_excel_raw(content)
+                rows = apply_column_mapping(raw_rows, explicit_mapping)
+            else:
+                rows = parse_excel(content)
+        elif filename.endswith(".csv"):
+            if explicit_mapping is not None:
+                _, raw_rows = parse_csv_raw(content)
+                rows = apply_column_mapping(raw_rows, explicit_mapping)
+            else:
+                rows = parse_csv(content)
+        else:
+            raise HTTPException(status_code=400, detail="Only .xlsx or .csv files are accepted")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}") from exc
 

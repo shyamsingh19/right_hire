@@ -147,3 +147,15 @@ class BulkIngestResponse(BaseModel):
     queued_count: int
     candidate_ids: list[str] = Field(default_factory=list)
     failed_count: int = 0
+
+
+class ColumnPreviewResponse(BaseModel):
+    """Returned by the /preview endpoint before final upload."""
+
+    columns: list[str]  # raw column names from the file
+    mapping: dict[str, str | None]  # canonical_field → raw_column (None = undetected)
+    sample_rows: list[dict]  # first 3 raw rows for user preview
+
+
+class CancelPendingResponse(BaseModel):
+    cancelled_count: int

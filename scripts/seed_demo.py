@@ -131,7 +131,7 @@ async def seed() -> None:
         import redis as redis_lib
         from rq import Queue
 
-        r = redis_lib.from_url(settings.redis_url)
+        r = redis_lib.from_url(settings.effective_redis_url)
         q = Queue("ats", connection=r)
         for cid in candidate_ids:
             q.enqueue("app.workers.tasks.process_candidate", cid, job.id, job_timeout=600)
