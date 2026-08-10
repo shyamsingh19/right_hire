@@ -19,6 +19,7 @@ from app.schemas import (
     CandidateResponse,
     CandidateWithEval,
     EvaluationResponse,
+    EvaluationUpdate,
     ReasoningCard,
     ScoreBreakdown,
 )
@@ -383,3 +384,57 @@ async def get_evaluation(
     response = EvaluationResponse.model_validate(eval_obj)
     response.reasoning_card = _build_reasoning_card(eval_obj, all_scores)
     return response
+
+
+@router.patch("/evaluations/{eval_id}", response_model=EvaluationResponse)
+async def update_evaluation(
+    eval_id: str,
+    body: EvaluationUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Manual recruiter override of a stored verdict/score. Does not re-run the pipeline
+    or touch the cache_key, so a later re-evaluation with the same inputs will still
+    serve the original (unedited) cached result."""
+    eval_obj = await db.get(Evaluation, eval_id)
+    if not eval_obj:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    await _get_owned_job(db, eval_obj.job_id, user)
+
+    if body.verdict is not None:
+        eval_obj.verdict = body.verdict
+    if body.score is not None:
+        eval_obj.score = body.score
+
+    db.add(eval_obj)
+    await db.commit()
+    await db.refresh(eval_obj)
+
+    all_scores_result = await db.execute(
+        select(Evaluation.score).where(
+            Evaluation.job_id == eval_obj.job_id,
+            Evaluation.score.is_not(None),
+        )
+    )
+    all_scores = [float(r) for r in all_scores_result.scalars().all()]
+
+    response = EvaluationResponse.model_validate(eval_obj)
+    response.reasoning_card = _build_reasoning_card(eval_obj, all_scores)
+    return response
+
+
+@router.delete("/evaluations/{eval_id}", status_code=204)
+async def delete_evaluation(
+    eval_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete an evaluation record. The candidate itself is untouched and can be
+    re-queued (e.g. by re-uploading its resume) to generate a fresh evaluation."""
+    eval_obj = await db.get(Evaluation, eval_id)
+    if not eval_obj:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    await _get_owned_job(db, eval_obj.job_id, user)
+
+    await db.delete(eval_obj)
+    await db.commit()

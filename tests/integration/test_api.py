@@ -423,3 +423,152 @@ def test_export_results_csv(client):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
     assert "Alice" in resp.text
+
+
+def test_update_job(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+
+    resp = client.patch(f"/jobs/{job_id}", json={"title": "Senior Eng", "weights": {"judge": 0.6}})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["title"] == "Senior Eng"
+    assert data["weights"] == {"judge": 0.6}
+    assert data["jd_raw"] == "Python required."  # untouched
+
+
+def test_update_job_not_found(client):
+    resp = client.patch("/jobs/nonexistent-id", json={"title": "X"})
+    assert resp.status_code == 404
+
+
+def test_update_job_cross_user_404(client, other_user_headers):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+
+    resp = client.patch(f"/jobs/{job_id}", json={"title": "Hijacked"}, headers=other_user_headers)
+    assert resp.status_code == 404
+
+
+def test_list_get_update_candidates(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+    client.post(
+        f"/jobs/{job_id}/candidates",
+        files={"file": ("c.csv", b"name,email\nAlice,alice@test.com\n", "text/csv")},
+    )
+
+    listed = client.get(f"/jobs/{job_id}/candidates")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+    candidate_id = listed.json()[0]["id"]
+
+    got = client.get(f"/jobs/{job_id}/candidates/{candidate_id}")
+    assert got.status_code == 200
+    assert got.json()["name"] == "Alice"
+
+    updated = client.patch(
+        f"/jobs/{job_id}/candidates/{candidate_id}",
+        json={"location": "Remote", "yoe": 7},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["location"] == "Remote"
+    assert updated.json()["yoe"] == 7
+
+
+def test_get_candidate_not_found(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+    resp = client.get(f"/jobs/{job_id}/candidates/nonexistent-id")
+    assert resp.status_code == 404
+
+
+def test_update_and_delete_evaluation(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+    client.post(
+        f"/jobs/{job_id}/candidates",
+        files={"file": ("c.csv", b"name,email\nAlice,alice@test.com\n", "text/csv")},
+    )
+    candidate_id = client.get(f"/jobs/{job_id}/candidates").json()[0]["id"]
+
+    # No worker running in this test process, so manually create the evaluation this
+    # endpoint is meant to override — mirrors how workers/tasks.py writes one.
+    from app.models import Evaluation
+
+    import asyncio
+
+    from app import db as db_module
+
+    async def _seed():
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        factory = async_sessionmaker(db_module.engine, class_=AsyncSession, expire_on_commit=False)
+        async with factory() as session:
+            ev = Evaluation(candidate_id=candidate_id, job_id=job_id, score=0.5, verdict="Maybe")
+            session.add(ev)
+            await session.commit()
+            await session.refresh(ev)
+            return ev.id
+
+    eval_id = asyncio.run(_seed())
+
+    resp = client.patch(f"/evaluations/{eval_id}", json={"verdict": "Fit", "score": 0.9})
+    assert resp.status_code == 200
+    assert resp.json()["verdict"] == "Fit"
+    assert resp.json()["score"] == 0.9
+
+    resp = client.delete(f"/evaluations/{eval_id}")
+    assert resp.status_code == 204
+    assert client.get(f"/evaluations/{eval_id}").status_code == 404
+
+
+def test_admin_users_crud_requires_admin_key(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_api_key", "")
+    assert client.get("/admin/users").status_code == 501
+
+    monkeypatch.setattr(settings, "admin_api_key", "operator-secret")
+    assert client.get("/admin/users").status_code == 401
+    assert client.get("/admin/users", headers={"X-Admin-Key": "wrong"}).status_code == 401
+
+
+def test_admin_users_list_get_update_delete(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_api_key", "operator-secret")
+    headers = {"X-Admin-Key": "operator-secret"}
+
+    listed = client.get("/admin/users", headers=headers)
+    assert listed.status_code == 200
+    user_id = next(u["id"] for u in listed.json() if u["email"] == "test@example.com")
+
+    got = client.get(f"/admin/users/{user_id}", headers=headers)
+    assert got.status_code == 200
+    assert got.json()["email"] == "test@example.com"
+
+    updated = client.patch(f"/admin/users/{user_id}", json={"credits": 42}, headers=headers)
+    assert updated.status_code == 200
+    assert updated.json()["credits"] == 42
+
+    deleted = client.delete(f"/admin/users/{user_id}", headers=headers)
+    assert deleted.status_code == 204
+    assert client.get(f"/admin/users/{user_id}", headers=headers).status_code == 404
+
+
+def test_admin_reset_api_key(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_api_key", "operator-secret")
+    headers = {"X-Admin-Key": "operator-secret"}
+
+    listed = client.get("/admin/users", headers=headers)
+    user_id = next(u["id"] for u in listed.json() if u["email"] == "test@example.com")
+
+    resp = client.post(f"/admin/users/{user_id}/reset-api-key", headers=headers)
+    assert resp.status_code == 200
+    new_key = resp.json()["api_key"]
+    assert new_key.startswith("rh_")
+
+    # Old key (used throughout this test via the `client` fixture's default header) no
+    # longer authenticates.
+    stale = client.get("/auth/me")
+    assert stale.status_code == 401
+
+    fresh = client.get("/auth/me", headers={"X-API-Key": new_key})
+    assert fresh.status_code == 200

@@ -11,7 +11,7 @@ from app.llm.base import LLMProvider
 from app.llm.factory import get_provider
 from app.models import Candidate, Evaluation, Job, User
 from app.pipeline.parse import parse_jd
-from app.schemas import JobCreate, JobResponse
+from app.schemas import JobCreate, JobResponse, JobUpdate
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -97,6 +97,30 @@ async def get_job(
     job = await db.get(Job, job_id)
     if not job or job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
+    return await _job_response(db, job)
+
+
+@router.patch("/{job_id}", response_model=JobResponse)
+async def update_job(
+    job_id: str,
+    body: JobUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Update a job's title, weights, or thresholds. jd_raw can't be edited here —
+    changing it requires re-parsing, which is a new job, not an update."""
+    job = await _get_owned_job(db, job_id, user)
+
+    if body.title is not None:
+        job.title = body.title
+    if body.weights is not None:
+        job.weights = body.weights
+    if body.thresholds is not None:
+        job.thresholds = body.thresholds
+
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
     return await _job_response(db, job)
 
 

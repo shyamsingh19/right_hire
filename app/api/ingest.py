@@ -8,7 +8,7 @@ from pathlib import Path
 import redis as redis_lib
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from rq import Queue, Retry
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.jobs import _get_owned_job
@@ -25,7 +25,13 @@ from app.pipeline.ingest import (
     parse_excel_raw,
     save_resume,
 )
-from app.schemas import BulkIngestResponse, CancelPendingResponse, ColumnPreviewResponse
+from app.schemas import (
+    BulkIngestResponse,
+    CancelPendingResponse,
+    CandidateResponse,
+    CandidateUpdate,
+    ColumnPreviewResponse,
+)
 
 router = APIRouter(prefix="/jobs", tags=["ingest"])
 logger = logging.getLogger(__name__)
@@ -288,6 +294,57 @@ async def ingest_candidates(
         candidate_ids=queued_ids,
         failed_count=len(failed_ids),
     )
+
+
+@router.get("/{job_id}/candidates", response_model=list[CandidateResponse])
+async def list_candidates(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _get_owned_job(db, job_id, user)
+    result = await db.execute(
+        select(Candidate).where(Candidate.job_id == job_id).order_by(Candidate.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+@router.get("/{job_id}/candidates/{candidate_id}", response_model=CandidateResponse)
+async def get_candidate(
+    job_id: str,
+    candidate_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    candidate = await _get_owned_candidate(db, job_id, candidate_id, user)
+    return candidate
+
+
+@router.patch("/{job_id}/candidates/{candidate_id}", response_model=CandidateResponse)
+async def update_candidate(
+    job_id: str,
+    candidate_id: str,
+    body: CandidateUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Edit candidate contact/profile fields. Does not touch resume_text, parsed, status,
+    or trigger re-evaluation — use the resume upload endpoint to re-queue a candidate."""
+    candidate = await _get_owned_candidate(db, job_id, candidate_id, user)
+
+    if body.name is not None:
+        candidate.name = body.name
+    if body.email is not None:
+        candidate.email = body.email
+    if body.yoe is not None:
+        candidate.yoe = body.yoe
+    if body.location is not None:
+        candidate.location = body.location
+
+    db.add(candidate)
+    await db.commit()
+    await db.refresh(candidate)
+    return candidate
 
 
 async def _get_owned_candidate(

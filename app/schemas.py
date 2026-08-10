@@ -44,6 +44,50 @@ class JobCreate(BaseModel):
     thresholds: dict[str, float] | None = None
 
 
+class JobUpdate(BaseModel):
+    """All fields optional — only provided fields are changed. `jd_raw` is intentionally
+    excluded: editing it would require re-running parse_jd, which is a create, not an
+    update (see CLAUDE.md: workers read jd_parsed, they never re-parse)."""
+
+    title: str | None = None
+    weights: dict[str, float] | None = None
+    thresholds: dict[str, float] | None = None
+
+
+class CandidateUpdate(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    yoe: float | None = None
+    location: str | None = None
+
+
+class EvaluationUpdate(BaseModel):
+    """Manual recruiter override of a stored verdict/score — does not re-run the pipeline."""
+
+    verdict: Literal["Fit", "Maybe", "Reject"] | None = None
+    score: float | None = None
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    email: str
+    credits: int
+    created_at: datetime
+
+
+class UserUpdate(BaseModel):
+    email: str | None = None
+    credits: int | None = None
+
+
+class ApiKeyResetResponse(BaseModel):
+    user_id: str
+    email: str
+    api_key: str  # shown once — only the hash is stored server-side
+
+
 # ── Response schemas ─────────────────────────────────────────────────────────
 
 
