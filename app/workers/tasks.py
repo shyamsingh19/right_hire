@@ -24,12 +24,18 @@ from app.skills.canonicalize import canonicalize_skill
 logger = logging.getLogger(__name__)
 
 
-# RQ tasks are sync — use a sync SQLAlchemy engine
-def _sync_session() -> tuple[Session, sessionmaker]:
-    url = settings.database_url
-    engine = create_engine(url, pool_pre_ping=True)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-    return factory()
+# RQ tasks are sync — use a sync SQLAlchemy engine.
+# Built once per worker process and reused across tasks: a fresh create_engine() per call
+# (the previous behavior) opens a brand new connection pool every time, which exhausts the
+# hosted MySQL's small concurrent-connection cap instead of reusing existing connections.
+_sync_engine = create_engine(
+    settings.database_url, pool_pre_ping=True, pool_recycle=280, pool_size=2, max_overflow=0
+)
+_SyncSessionLocal = sessionmaker(bind=_sync_engine, expire_on_commit=False)
+
+
+def _sync_session() -> Session:
+    return _SyncSessionLocal()
 
 
 def _cache_key(resume_text: str, jd_parsed: dict, weights: dict, thresholds: dict) -> str:

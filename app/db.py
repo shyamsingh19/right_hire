@@ -16,11 +16,17 @@ def _make_engine(url: str):
     connect_args = {}
     if "sqlite" in url:
         connect_args["check_same_thread"] = False
+    # filess.io caps this account at 5 concurrent connections total, shared with the
+    # worker's sync engine (app/workers/tasks.py) — keep this pool small rather than
+    # SQLAlchemy's default (5 + 10 overflow), which alone would exceed the quota.
+    pool_kwargs = {} if "sqlite" in url else {"pool_size": 3, "max_overflow": 0}
     return create_async_engine(
         url,
         echo=False,
         pool_pre_ping=True,
+        pool_recycle=280,
         connect_args=connect_args,
+        **pool_kwargs,
     )
 
 
