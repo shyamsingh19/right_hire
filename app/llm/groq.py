@@ -53,6 +53,7 @@ class GroqProvider(LLMProvider):
                     OpenAI(
                         api_key=self.api_key,
                         base_url=_GROQ_BASE_URL,
+                        timeout=60.0,
                     ),
                     mode=instructor.Mode.JSON,
                 )
