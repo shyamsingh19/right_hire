@@ -13,7 +13,17 @@ from right_hire_ui.states.create_job_state import CreateJobState
 from right_hire_ui.states.results_state import ResultsState
 from right_hire_ui.states.upload_state import UploadState
 
-app = rx.App(theme=get_theme(), stylesheets=STYLESHEETS)
+app = rx.App(
+    theme=get_theme(),
+    stylesheets=STYLESHEETS,
+    toaster=rx.toast.provider(
+        position="bottom-right",
+        close_button=True,
+        rich_colors=True,
+        offset="1.5rem",
+        toast_options=rx.toast.options(style={"maxWidth": "min(24rem, calc(100vw - 3rem))"}),
+    ),
+)
 
 app.add_page(
     create_job_page,

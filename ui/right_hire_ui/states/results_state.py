@@ -104,6 +104,28 @@ def _build_row(item: dict) -> dict:
     }
 
 
+_EMPTY_INSPECT_ROW: dict = {
+    "candidate_id": "",
+    "name": "",
+    "email": "",
+    "yoe": "",
+    "location": "",
+    "status": "",
+    "has_eval": False,
+    "is_error": False,
+    "error": "",
+    "verdict": "",
+    "score_display": "—",
+    "rank_display": "",
+    "summary": "",
+    "confidence": "",
+    "matched_skills": [],
+    "breakdown_rows": [],
+    "model_used": "",
+    "rubric_rows": [],
+}
+
+
 class ResultsState(AppState):
     selected_job_id: str = ""
     verdict_filter: str = "All"
@@ -132,7 +154,7 @@ class ResultsState(AppState):
         for row in self.display_rows:
             if row["candidate_id"] == self.inspect_candidate_id:
                 return row
-        return {}
+        return _EMPTY_INSPECT_ROW
 
     @rx.var
     def inspect_resume_text(self) -> str:
