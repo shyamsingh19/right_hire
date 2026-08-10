@@ -640,6 +640,63 @@ def _processing_status_banner() -> rx.Component:
     )
 
 
+def _summary_stat(label: str, value: rx.Var, color_scheme: str) -> rx.Component:
+    return rx.vstack(
+        rx.text(value.to(str), size="6", weight="bold", color=rx.color(color_scheme, 9)),
+        rx.text(label, size="1", color=rx.color("gray", 10)),
+        spacing="0",
+        align="center",
+    )
+
+
+def _failure_reason_row(item: dict) -> rx.Component:
+    return rx.hstack(
+        rx.icon("triangle-alert", size=12, color=rx.color("orange", 9)),
+        rx.text(item["label"].to(str), size="2"),
+        rx.spacer(),
+        rx.badge(item["count"].to(str), variant="soft", color_scheme="orange", size="1"),
+        width="100%",
+        align="center",
+    )
+
+
+def _results_summary_panel() -> rx.Component:
+    """Batch-level rollup shown once results are loaded: verdict counts plus a
+    breakdown of *why* any candidates need attention, so the cause of a failed
+    batch (private Drive links, LLM outage, etc.) is visible at a glance."""
+    return rx.cond(
+        ResultsState.has_loaded & (ResultsState.total_count > 0),
+        rx.vstack(
+            rx.hstack(
+                _summary_stat("Total", ResultsState.total_count, "gray"),
+                _summary_stat("Fit", ResultsState.fit_count, "green"),
+                _summary_stat("Maybe", ResultsState.maybe_count, "amber"),
+                _summary_stat("Reject", ResultsState.reject_count, "red"),
+                _summary_stat("Needs attention", ResultsState.needs_attention_count, "orange"),
+                spacing="6",
+                width="100%",
+                justify="center",
+            ),
+            rx.cond(
+                ResultsState.failure_reason_counts.length() > 0,
+                rx.vstack(
+                    rx.divider(),
+                    rx.text("Why candidates need attention", weight="medium", size="2"),
+                    rx.foreach(ResultsState.failure_reason_counts, _failure_reason_row),
+                    spacing="2",
+                    width="100%",
+                    align="start",
+                ),
+            ),
+            padding="1em",
+            border=f"1px solid {rx.color('gray', 5)}",
+            border_radius="var(--radius-3)",
+            width="100%",
+            spacing="3",
+        ),
+    )
+
+
 def _delete_job_dialog() -> rx.Component:
     """Confirm before deleting a job and all its data — this is irreversible."""
     return rx.alert_dialog.root(
@@ -715,6 +772,7 @@ def results_page() -> rx.Component:
                         width="fit-content",
                     ),
                     _processing_status_banner(),
+                    _results_summary_panel(),
                     rx.cond(ResultsState.has_loaded, _score_distribution_card()),
                     rx.cond(
                         ResultsState.load_error != "",

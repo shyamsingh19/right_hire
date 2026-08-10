@@ -429,3 +429,42 @@ class ResultsState(AppState):
     @rx.var
     def display_rows(self) -> list[dict[str, Any]]:
         return [_build_row(item) for item in self.results]
+
+    @rx.var
+    def needs_attention_count(self) -> int:
+        return sum(1 for r in self.display_rows if r["is_error"])
+
+    @rx.var
+    def fit_count(self) -> int:
+        return sum(1 for r in self.display_rows if r["verdict"] == "Fit")
+
+    @rx.var
+    def maybe_count(self) -> int:
+        return sum(1 for r in self.display_rows if r["verdict"] == "Maybe")
+
+    @rx.var
+    def reject_count(self) -> int:
+        return sum(1 for r in self.display_rows if r["verdict"] == "Reject")
+
+    @rx.var
+    def failure_reason_counts(self) -> list[dict]:
+        """Buckets processing-failure messages into broad categories so the summary
+        panel can show *why* candidates need attention, not just how many."""
+        counts: dict[str, int] = {}
+        for r in self.display_rows:
+            if not r["is_error"]:
+                continue
+            err = r["error"]
+            if "Google Drive link is PRIVATE" in err:
+                label = "Private Google Drive link"
+            elif "LLM provider unavailable" in err:
+                label = "LLM provider unavailable"
+            elif err:
+                label = "Other error"
+            else:
+                label = "Unknown error"
+            counts[label] = counts.get(label, 0) + 1
+        return [
+            {"label": label, "count": count}
+            for label, count in sorted(counts.items(), key=lambda kv: -kv[1])
+        ]
