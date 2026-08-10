@@ -1,19 +1,44 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
+from app.config import settings
 from app.db import get_db
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, LLMUnavailableError
 from app.llm.factory import get_provider
-from app.models import Candidate, Evaluation, Job, User
+from app.models import Candidate, CandidateStatus, Evaluation, Job, User
 from app.pipeline.parse import parse_jd
-from app.schemas import JdParseRequest, JobCreate, JobResponse, JobUpdate, ParsedJD
+from app.schemas import JdParseRequest, JobCreate, JobProgress, JobResponse, JobUpdate, ParsedJD
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
+
+
+def _enqueue_jd_parse(job_id: str) -> bool:
+    """Best-effort enqueue of the deferred JD parse. Returns False (never raises) if
+    the queue itself is unreachable — the job still exists with jd_parse_pending=True
+    and can be retried by re-saving it, so this must not turn into a request failure."""
+    try:
+        import redis as redis_lib
+        from rq import Queue, Retry
+
+        r = redis_lib.from_url(settings.effective_redis_url)
+        Queue("ats", connection=r).enqueue(
+            "app.workers.tasks.parse_job_description",
+            job_id,
+            job_timeout=120,
+            retry=Retry(max=3, interval=[30, 60, 120]),
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Failed to enqueue JD parse for job=%s: %s", job_id, exc)
+        return False
 
 
 @router.post("/parse-jd", response_model=ParsedJD)
@@ -35,17 +60,28 @@ async def create_job(
     user: User = Depends(get_current_user),
     provider: LLMProvider = Depends(get_provider),
 ):
-    parsed_jd = (
-        body.jd_parsed_override
-        if body.jd_parsed_override is not None
-        else parse_jd(body.jd_raw, provider)
-    )
+    parsed_jd: ParsedJD | None = body.jd_parsed_override
+    jd_parse_pending = False
+
+    if parsed_jd is None:
+        # No wizard-reviewed override was supplied — parse jd_raw now. If the LLM
+        # backend is down, don't block job creation on it: save the job with an
+        # empty jd_parsed and let a queued worker task fill it in once the backend
+        # recovers (see app/workers/tasks.py:parse_job_description). Candidates can't
+        # usefully be scored against an empty jd_parsed, but the job/title/jd_raw are
+        # preserved and visible immediately rather than losing the recruiter's input.
+        try:
+            parsed_jd = parse_jd(body.jd_raw, provider)
+        except LLMUnavailableError:
+            parsed_jd = ParsedJD()
+            jd_parse_pending = True
 
     job = Job(
         user_id=user.id,
         title=body.title,
         jd_raw=body.jd_raw,
         jd_parsed=parsed_jd.model_dump(),
+        jd_parse_pending=jd_parse_pending,
         weights=body.weights,
         thresholds=body.thresholds,
     )
@@ -53,11 +89,15 @@ async def create_job(
     await db.commit()
     await db.refresh(job)
 
+    if jd_parse_pending:
+        _enqueue_jd_parse(job.id)
+
     return JobResponse(
         id=job.id,
         title=job.title,
         jd_raw=job.jd_raw,
         jd_parsed=job.jd_parsed,
+        jd_parse_pending=job.jd_parse_pending,
         weights=job.weights,
         thresholds=job.thresholds,
         created_at=job.created_at,
@@ -84,6 +124,7 @@ async def _job_response(db: AsyncSession, job: Job) -> JobResponse:
         title=job.title,
         jd_raw=job.jd_raw,
         jd_parsed=job.jd_parsed,
+        jd_parse_pending=job.jd_parse_pending,
         weights=job.weights,
         thresholds=job.thresholds,
         created_at=job.created_at,
@@ -114,6 +155,44 @@ async def get_job(
     if not job or job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
     return await _job_response(db, job)
+
+
+@router.get("/{job_id}/progress", response_model=JobProgress)
+async def job_progress(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Per-status candidate counts for this job — cheap enough to poll every few
+    seconds from the UI without pulling full result payloads (see GET /jobs/{id}/results
+    for that). Powers the upload/results pages' live progress indicator."""
+    await _get_owned_job(db, job_id, user)
+
+    status_counts_result = await db.execute(
+        select(Candidate.status, func.count())
+        .where(Candidate.job_id == job_id)
+        .group_by(Candidate.status)
+    )
+    counts = {status: count for status, count in status_counts_result.fetchall()}
+
+    last_candidate_result = await db.execute(
+        select(func.max(Candidate.created_at)).where(Candidate.job_id == job_id)
+    )
+    last_eval_result = await db.execute(
+        select(func.max(Evaluation.created_at)).where(Evaluation.job_id == job_id)
+    )
+    timestamps = [t for t in (last_candidate_result.scalar(), last_eval_result.scalar()) if t]
+    last_updated = max(timestamps) if timestamps else None
+
+    return JobProgress(
+        job_id=job_id,
+        total=sum(counts.values()),
+        pending=counts.get(CandidateStatus.pending, 0),
+        processing=counts.get(CandidateStatus.processing, 0),
+        done=counts.get(CandidateStatus.done, 0),
+        failed=counts.get(CandidateStatus.failed, 0),
+        last_updated=last_updated,
+    )
 
 
 @router.patch("/{job_id}", response_model=JobResponse)

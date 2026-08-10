@@ -97,6 +97,18 @@ class CreateJobState(AppState):
             return f"Weights must sum to 1.0 (currently {self.weight_total:.2f})."
         return ""
 
+    def normalize_weights(self) -> None:
+        """Rescales all three weights proportionally so they sum to exactly 1.0,
+        preserving their relative balance instead of resetting to defaults."""
+        total = self.skill_weight + self.cosine_weight + self.judge_weight
+        if total <= 0:
+            self.skill_weight, self.cosine_weight, self.judge_weight = 0.30, 0.20, 0.50
+            return
+        self.skill_weight = round(self.skill_weight / total, 2)
+        self.cosine_weight = round(self.cosine_weight / total, 2)
+        # Last one absorbs rounding error so the three still sum to exactly 1.0.
+        self.judge_weight = round(1.0 - self.skill_weight - self.cosine_weight, 2)
+
     async def parse_criteria(self):
         """Step 1 -> Step 2: pre-flight parse via POST /jobs/parse-jd. Doesn't create a
         job or spend credits — lets the recruiter review/edit before committing."""

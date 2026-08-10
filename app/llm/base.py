@@ -5,6 +5,14 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 
 
+class LLMUnavailableError(RuntimeError):
+    """Raised when the configured LLM backend can't be reached or misconfigured.
+
+    Caught at the API boundary (app/main.py) and turned into a 503 with a
+    user-friendly message instead of a raw 500 stack trace.
+    """
+
+
 class LLMProvider(ABC):
     """Abstract base for all LLM backends."""
 

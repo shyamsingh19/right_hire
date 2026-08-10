@@ -8,7 +8,7 @@ import httpx
 from pydantic import BaseModel
 
 from app.config import settings
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class LocalProvider(LLMProvider):
         # Name the underlying cause in the message itself, not just the __cause__ chain:
         # workers persist str(exc), so a bare "failed after N attempts" reaches the operator
         # with the actual reason (timeout? bad JSON? model unloaded?) already discarded.
-        raise RuntimeError(
+        raise LLMUnavailableError(
             f"LocalProvider.complete_json failed after {_MAX_RETRIES} attempts "
             f"[{self.model} @ {self.base_url}] — {type(last_exc).__name__}: {last_exc}"
         ) from last_exc
@@ -134,7 +134,7 @@ class LocalProvider(LLMProvider):
                         if attempt < _MAX_RETRIES:
                             time.sleep(_BACKOFF_BASE**attempt)
                 else:
-                    raise RuntimeError(
+                    raise LLMUnavailableError(
                         f"LocalProvider.embed failed after {_MAX_RETRIES} attempts "
                         f"[{embed_model} @ {self.base_url}] — "
                         f"{type(last_exc).__name__}: {last_exc}"

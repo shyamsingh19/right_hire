@@ -73,6 +73,15 @@ async def request_credits(api_key: str) -> dict:
         return resp.json()
 
 
+async def get_credit_requests(api_key: str) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{API_BASE}/billing/requests", headers=_headers(api_key), timeout=10
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
 async def get_jobs(api_key: str) -> list[dict]:
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{API_BASE}/jobs", headers=_headers(api_key), timeout=10)
@@ -126,6 +135,15 @@ async def update_job_thresholds(api_key: str, job_id: str, thresholds: dict) -> 
             headers=_headers(api_key),
             json={"thresholds": thresholds},
             timeout=30,
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def get_job_progress(api_key: str, job_id: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{API_BASE}/jobs/{job_id}/progress", headers=_headers(api_key), timeout=15
         )
         await _raise_for_status(resp)
         return resp.json()

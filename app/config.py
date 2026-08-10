@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     signup_free_credits: int = 3  # trial credits granted on signup, no payment needed
     payment_link_url: str = ""  # e.g. a Stripe Payment Link / PayPal.me URL, operator's choice
     admin_api_key: str = ""  # shared secret for POST /billing/admin/grant-credits; unset = disabled
+    # Shown alongside a pending credit request so the user has somewhere to follow up
+    # besides waiting — e.g. "support@example.com" or a Slack/Discord invite link.
+    support_contact: str = ""
 
     @staticmethod
     def _is_real(value: str) -> bool:

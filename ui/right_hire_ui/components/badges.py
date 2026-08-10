@@ -13,7 +13,14 @@ def verdict_pill(verdict: rx.Var[str] | str) -> rx.Component:
         ("Reject", "red"),
         "gray",
     )
-    return rx.badge(verdict, color_scheme=color, variant="soft", size="2", radius="full")
+    return rx.badge(
+        verdict,
+        color_scheme=color,
+        variant="soft",
+        size="2",
+        radius="full",
+        aria_label="Verdict: " + verdict,
+    )
 
 
 def status_badge(status: rx.Var[str] | str) -> rx.Component:
@@ -25,7 +32,33 @@ def status_badge(status: rx.Var[str] | str) -> rx.Component:
         ("failed", "red"),
         "gray",
     )
-    return rx.badge(status, color_scheme=color, variant="soft", size="2", radius="full")
+    return rx.badge(
+        status,
+        color_scheme=color,
+        variant="soft",
+        size="2",
+        radius="full",
+        aria_label="Status: " + status,
+    )
+
+
+def confidence_badge(confidence: rx.Var[str] | str) -> rx.Component:
+    """How close a verdict is to the nearest Fit/Maybe cutoff — "Low" flags a score a
+    recruiter should sanity-check manually rather than act on directly."""
+    color = rx.match(
+        confidence,
+        ("High", "green"),
+        ("Medium", "amber"),
+        ("Low", "red"),
+        "gray",
+    )
+    return rx.badge(
+        confidence + " confidence",
+        color_scheme=color,
+        variant="outline",
+        size="1",
+        aria_label=confidence + " confidence verdict",
+    )
 
 
 def signal_chip(label: rx.Var[str] | str, kind: rx.Var[str] | str) -> rx.Component:

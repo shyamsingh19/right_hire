@@ -4,7 +4,12 @@ from typing import Any
 
 import reflex as rx
 
-from right_hire_ui.components.badges import signal_chip, status_badge, verdict_pill
+from right_hire_ui.components.badges import (
+    confidence_badge,
+    signal_chip,
+    status_badge,
+    verdict_pill,
+)
 from right_hire_ui.components.cards import section_card
 from right_hire_ui.components.empty_state import empty_state
 from right_hire_ui.components.job_picker import job_picker
@@ -214,6 +219,10 @@ def _inspector_left(row: dict) -> rx.Component:
         rx.hstack(
             verdict_pill(row["verdict"].to(str)),
             rx.text(row["score_display"].to(str), size="3", weight="medium"),
+            rx.cond(
+                row["confidence"].to(str) != "",
+                confidence_badge(row["confidence"].to(str)),
+            ),
             spacing="2",
             align="center",
         ),
@@ -331,6 +340,10 @@ def _result_header(row: dict) -> rx.Component:
         rx.cond(
             rank_display != "",
             rx.badge(rank_display, variant="soft", color_scheme="gray", size="1"),
+        ),
+        rx.cond(
+            has_eval & (row["confidence"].to(str) == "Low"),
+            confidence_badge(row["confidence"].to(str)),
         ),
         spacing="3",
         align="center",

@@ -26,6 +26,8 @@ class AppState(rx.State):
     is_loading_account: bool = False
     credits_message: str = ""
     payment_link: str = ""
+    support_contact: str = ""
+    credit_requests: list[dict] = []  # noqa: RUF012
 
     def set_signup_email(self, value: str) -> None:
         self.signup_email = value
@@ -47,6 +49,8 @@ class AppState(rx.State):
         self.user_email = ""
         self.credits_message = ""
         self.payment_link = ""
+        self.support_contact = ""
+        self.credit_requests = []
 
     async def rotate_key(self):
         """Swap in a fresh key. The old one stops working the moment this returns, so the
@@ -78,9 +82,24 @@ class AppState(rx.State):
             result = await api_client.request_credits(self.api_key)
             self.credits_message = result.get("message", "")
             self.payment_link = result.get("payment_link") or ""
+            self.support_contact = result.get("support_contact") or ""
             yield rx.toast.info(self.credits_message)
+            await self.load_credit_requests()
         except (httpx.HTTPError, api_client.ApiError) as e:
             yield rx.toast.error(str(e))
+
+    async def load_credit_requests(self) -> None:
+        if not self.api_key:
+            self.credit_requests = []
+            return
+        try:
+            self.credit_requests = await api_client.get_credit_requests(self.api_key)
+        except (httpx.HTTPError, api_client.ApiError):
+            pass  # keep whatever was already shown on a transient network error
+
+    @rx.var
+    def has_pending_credit_request(self) -> bool:
+        return any(r.get("status") == "pending" for r in self.credit_requests)
 
     async def signup(self):
         self.auth_error = ""
@@ -122,6 +141,7 @@ class AppState(rx.State):
             self.is_loading_account = True
             yield
             await self.load_credits()
+            await self.load_credit_requests()
             self.is_loading_account = False
 
     @rx.var

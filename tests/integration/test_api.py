@@ -34,7 +34,8 @@ def test_health_reports_every_dependency(client):
     assert resp.status_code in (200, 503)
     body = resp.json()
     assert body["status"] in ("ok", "degraded")
-    assert set(body["checks"]) == {"db", "redis", "llm"}
+    assert set(body["checks"]) == {"db", "redis", "llm", "storage"}
+    assert set(body["targets"]) == {"db", "redis", "llm", "storage_dir"}
 
 
 def test_health_degraded_when_llm_unreachable(client, monkeypatch):

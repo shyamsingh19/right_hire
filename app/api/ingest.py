@@ -179,7 +179,13 @@ async def ingest_candidates(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await _get_owned_job(db, job_id, user)
+    job = await _get_owned_job(db, job_id, user)
+    if job.jd_parse_pending:
+        raise HTTPException(
+            status_code=409,
+            detail="This job's description is still being parsed (the AI backend was "
+            "unavailable when it was created) — try again in a minute.",
+        )
 
     filename = file.filename or ""
     content = await file.read()

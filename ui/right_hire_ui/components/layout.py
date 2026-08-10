@@ -35,6 +35,18 @@ def _nav_link(route: str, label: str, icon: str) -> rx.Component:
     )
 
 
+def _credit_request_row(item: dict) -> rx.Component:
+    status = item["status"].to(str)
+    scheme = rx.match(status, ("granted", "green"), ("pending", "amber"), "gray")
+    return rx.hstack(
+        rx.text(item["created_at"].to(str), size="1", color=rx.color("gray", 10)),
+        rx.spacer(),
+        rx.badge(status, color_scheme=scheme, variant="soft", size="1"),
+        width="100%",
+        align="center",
+    )
+
+
 def _credits_block() -> rx.Component:
     """1 credit = 1 candidate evaluated. Top-ups are approved by a human out-of-band,
     so this only asks — it never charges (see app/api/billing.py)."""
@@ -65,6 +77,16 @@ def _credits_block() -> rx.Component:
                 "Out of credits — uploads will be rejected.",
                 size="1",
                 color=rx.color("red", 9),
+                role="alert",
+            ),
+        ),
+        rx.cond(
+            AppState.has_pending_credit_request,
+            rx.callout(
+                "A credit request is pending operator approval.",
+                icon="clock",
+                color_scheme="amber",
+                size="1",
             ),
         ),
         rx.button(
@@ -86,6 +108,23 @@ def _credits_block() -> rx.Component:
                 is_external=True,
                 size="1",
                 color=rx.color("violet", 10),
+            ),
+        ),
+        rx.cond(
+            AppState.support_contact != "",
+            rx.text(
+                "Or reach out: " + AppState.support_contact,
+                size="1",
+                color=rx.color("gray", 10),
+            ),
+        ),
+        rx.cond(
+            AppState.credit_requests.length() > 0,
+            rx.vstack(
+                rx.text("Request history", size="1", weight="medium", color=rx.color("gray", 11)),
+                rx.foreach(AppState.credit_requests, _credit_request_row),
+                spacing="1",
+                width="100%",
             ),
         ),
         spacing="2",

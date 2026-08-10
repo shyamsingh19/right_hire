@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     Float,
@@ -61,6 +62,10 @@ class Job(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     jd_raw: Mapped[str] = mapped_column(Text, nullable=False)
     jd_parsed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # True when the job was created while the LLM backend was down — jd_raw was saved but
+    # parsing was deferred to an async worker task (app/workers/tasks.py:parse_job_description)
+    # instead of blocking job creation. See CLAUDE.md's LLM-failure-handling note.
+    jd_parse_pending: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     weights: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     thresholds: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -125,3 +130,20 @@ class Evaluation(Base):
 
     candidate: Mapped[Candidate] = relationship("Candidate", back_populates="evaluation")
     job: Mapped[Job] = relationship("Job", back_populates="evaluations")
+
+
+class CreditRequest(Base):
+    """A logged POST /billing/request-credits call — lets a user see their own request
+    history and lets the UI show "pending" state instead of a fire-and-forget toast.
+    Granting credits (POST /billing/admin/grant-credits) marks the most recent open
+    request 'granted'; it stays 'pending' until an operator does that by hand."""
+
+    __tablename__ = "credit_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

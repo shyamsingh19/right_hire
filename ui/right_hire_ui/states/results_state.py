@@ -37,6 +37,7 @@ def _build_row(item: dict) -> dict:
 
     # Summary sentence
     summary = rc.get("summary", "") if rc else ""
+    confidence = (rc.get("confidence") if rc else None) or ""
 
     # Matched skills from reasoning card (preferred) or reasons fallback
     matched_skills: list[str] = []
@@ -95,6 +96,7 @@ def _build_row(item: dict) -> dict:
         "score_display": score_display,
         "rank_display": rank_display,
         "summary": summary,
+        "confidence": confidence,
         "matched_skills": matched_skills,
         "breakdown_rows": breakdown_rows,
         "model_used": (e.get("model_used") or "N/A") if e else "N/A",

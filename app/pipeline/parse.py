@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, LLMUnavailableError
 from app.schemas import ParsedJD, ParsedResume
 
 logger = logging.getLogger(__name__)
@@ -96,11 +96,19 @@ def parse_resume(text: str, provider: LLMProvider) -> ParsedResume:
     """Parse raw resume text into a structured ParsedResume using the LLM."""
     template = _load_prompt("parse_resume.txt")
     prompt = template.replace("{{RESUME_TEXT}}", text[:6000])  # cap context
-    return provider.complete_json(prompt, ParsedResume, max_tokens=512)
+    try:
+        return provider.complete_json(prompt, ParsedResume, max_tokens=512)
+    except Exception as exc:  # normalize any provider error
+        logger.warning("LLM provider failed while parsing resume: %s", exc)
+        raise LLMUnavailableError("LLM provider unavailable for resume parsing") from exc
 
 
 def parse_jd(jd_raw: str, provider: LLMProvider) -> ParsedJD:
     """Parse a raw job description into a structured ParsedJD using the LLM."""
     template = _load_prompt("parse_jd.txt")
     prompt = template.replace("{{JD_TEXT}}", jd_raw[:4000])
-    return provider.complete_json(prompt, ParsedJD, max_tokens=512)
+    try:
+        return provider.complete_json(prompt, ParsedJD, max_tokens=512)
+    except Exception as exc:  # normalize any provider error
+        logger.warning("LLM provider failed while parsing JD: %s", exc)
+        raise LLMUnavailableError("LLM provider unavailable for JD parsing") from exc

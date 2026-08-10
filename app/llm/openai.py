@@ -5,7 +5,7 @@ import logging
 from pydantic import BaseModel
 
 from app.config import settings
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class OpenAIProvider(LLMProvider):
         self.model = model or "gpt-4o-mini"
         self.api_key = settings.openai_api_key
         if not self.api_key:
-            raise ValueError("OPENAI_API_KEY is not set in environment")
+            raise LLMUnavailableError("OPENAI_API_KEY is not set — LLM_BACKEND=openai requires it")
 
     def health_check(self) -> None:
         """Probe OpenAI's /models — validates both reachability and the API key."""
@@ -49,23 +49,33 @@ class OpenAIProvider(LLMProvider):
             OpenAI(api_key=self.api_key),
             mode=instructor.Mode.JSON,
         )
-        return client.chat.completions.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            response_model=schema,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-        )
+        try:
+            return client.chat.completions.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                response_model=schema,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+        except Exception as exc:
+            if type(exc).__module__.startswith("openai"):
+                raise LLMUnavailableError(f"OpenAIProvider.complete_json failed: {exc}") from exc
+            raise
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Return embeddings using OpenAI text-embedding-3-small."""
         from openai import OpenAI
 
         client = OpenAI(api_key=self.api_key)
-        response = client.embeddings.create(
-            model=_EMBED_MODEL,
-            input=texts,
-        )
+        try:
+            response = client.embeddings.create(
+                model=_EMBED_MODEL,
+                input=texts,
+            )
+        except Exception as exc:
+            if type(exc).__module__.startswith("openai"):
+                raise LLMUnavailableError(f"OpenAIProvider.embed failed: {exc}") from exc
+            raise
         # Sort by index to guarantee order matches input
         items = sorted(response.data, key=lambda x: x.index)
         return [item.embedding for item in items]

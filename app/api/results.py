@@ -76,9 +76,27 @@ def _friendly_error(raw: str | None) -> str:
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
+# Distance from the nearest Fit/Maybe cutoff below which a verdict is "Low" confidence —
+# small enough that a slightly different rubric run could have landed on the other side.
+_LOW_CONFIDENCE_MARGIN = 0.05
+_MEDIUM_CONFIDENCE_MARGIN = 0.15
+
+
+def _confidence_band(score: float, thresholds: dict) -> str:
+    fit = thresholds.get("fit", _DEFAULT_THRESHOLDS["fit"])
+    maybe = thresholds.get("maybe", _DEFAULT_THRESHOLDS["maybe"])
+    distance = min(abs(score - fit), abs(score - maybe))
+    if distance < _LOW_CONFIDENCE_MARGIN:
+        return "Low"
+    if distance < _MEDIUM_CONFIDENCE_MARGIN:
+        return "Medium"
+    return "High"
+
+
 def _build_reasoning_card(
     eval_obj: Evaluation,
     all_scores: list[float],
+    thresholds: dict | None = None,
 ) -> ReasoningCard:
     """Build a human-readable reasoning card from stored evaluation data."""
     reasons: dict = eval_obj.reasons or {}
@@ -158,6 +176,7 @@ def _build_reasoning_card(
         criterion_reasons=criterion_reasons,
         matched_skills=matched_skills,
         summary=summary,
+        confidence=_confidence_band(score, thresholds or _DEFAULT_THRESHOLDS),
     )
 
 
@@ -213,7 +232,8 @@ async def list_results(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await _get_owned_job(db, job_id, user)
+    job = await _get_owned_job(db, job_id, user)
+    thresholds = {**_DEFAULT_THRESHOLDS, **(job.thresholds or {})}
 
     # Fetch ALL scores for this job upfront (needed for percentile)
     all_evals_result = await db.execute(
@@ -244,7 +264,7 @@ async def list_results(
         eval_response: EvaluationResponse | None = None
         if eval_obj:
             eval_response = EvaluationResponse.model_validate(eval_obj)
-            eval_response.reasoning_card = _build_reasoning_card(eval_obj, all_scores)
+            eval_response.reasoning_card = _build_reasoning_card(eval_obj, all_scores, thresholds)
 
         out.append(
             CandidateWithEval(
@@ -370,7 +390,10 @@ async def get_evaluation(
     eval_obj = await db.get(Evaluation, eval_id)
     if not eval_obj:
         raise HTTPException(status_code=404, detail="Evaluation not found")
-    await _get_owned_job(db, eval_obj.job_id, user)  # 404s if the eval belongs to another user
+    job = await _get_owned_job(
+        db, eval_obj.job_id, user
+    )  # 404s if the eval belongs to another user
+    thresholds = {**_DEFAULT_THRESHOLDS, **(job.thresholds or {})}
 
     # Fetch sibling scores for percentile
     all_scores_result = await db.execute(
@@ -382,7 +405,7 @@ async def get_evaluation(
     all_scores = [float(r) for r in all_scores_result.scalars().all()]
 
     response = EvaluationResponse.model_validate(eval_obj)
-    response.reasoning_card = _build_reasoning_card(eval_obj, all_scores)
+    response.reasoning_card = _build_reasoning_card(eval_obj, all_scores, thresholds)
     return response
 
 
@@ -399,7 +422,8 @@ async def update_evaluation(
     eval_obj = await db.get(Evaluation, eval_id)
     if not eval_obj:
         raise HTTPException(status_code=404, detail="Evaluation not found")
-    await _get_owned_job(db, eval_obj.job_id, user)
+    job = await _get_owned_job(db, eval_obj.job_id, user)
+    thresholds = {**_DEFAULT_THRESHOLDS, **(job.thresholds or {})}
 
     if body.verdict is not None:
         eval_obj.verdict = body.verdict
@@ -419,7 +443,7 @@ async def update_evaluation(
     all_scores = [float(r) for r in all_scores_result.scalars().all()]
 
     response = EvaluationResponse.model_validate(eval_obj)
-    response.reasoning_card = _build_reasoning_card(eval_obj, all_scores)
+    response.reasoning_card = _build_reasoning_card(eval_obj, all_scores, thresholds)
     return response
 
 

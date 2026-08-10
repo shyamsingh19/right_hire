@@ -12,7 +12,7 @@ def _threshold_slider(label: str, value, on_change) -> rx.Component:
         rx.hstack(
             rx.text(label, size="3", weight="medium"),
             rx.spacer(),
-            rx.badge(value.to_string(), variant="soft", color_scheme="violet"),
+            rx.badge(f"{value:.2f}", variant="soft", color_scheme="violet"),
             width="100%",
         ),
         rx.slider(
@@ -22,6 +22,7 @@ def _threshold_slider(label: str, value, on_change) -> rx.Component:
             max=1,
             step=0.05,
             width="100%",
+            aria_label=label,
         ),
         width="100%",
         spacing="1",
@@ -33,10 +34,18 @@ def _weight_slider(label: str, value, on_change) -> rx.Component:
         rx.hstack(
             rx.text(label, size="2", weight="medium"),
             rx.spacer(),
-            rx.badge(f"{value * 100:.0f}%", variant="soft", color_scheme="blue"),
+            rx.badge(f"{value * 100:.2f}%", variant="soft", color_scheme="blue"),
             width="100%",
         ),
-        rx.slider(value=[value], on_change=on_change, min=0, max=1, step=0.05, width="100%"),
+        rx.slider(
+            value=[value],
+            on_change=on_change,
+            min=0,
+            max=1,
+            step=0.05,
+            width="100%",
+            aria_label=label,
+        ),
         width="100%",
         spacing="1",
     )
@@ -217,8 +226,22 @@ def _weights_editor() -> rx.Component:
         _weight_slider("LLM judge", CreateJobState.judge_weight, CreateJobState.set_judge_weight),
         rx.cond(
             CreateJobState.weight_error != "",
-            rx.callout(
-                CreateJobState.weight_error, icon="triangle-alert", color_scheme="amber", size="1"
+            rx.hstack(
+                rx.callout(
+                    CreateJobState.weight_error,
+                    icon="triangle-alert",
+                    color_scheme="amber",
+                    size="1",
+                ),
+                rx.button(
+                    "Auto-normalize",
+                    on_click=CreateJobState.normalize_weights,
+                    size="1",
+                    variant="soft",
+                ),
+                align="center",
+                spacing="2",
+                width="100%",
             ),
         ),
         width="100%",

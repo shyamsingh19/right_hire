@@ -106,6 +106,7 @@ class JobResponse(BaseModel):
     title: str
     jd_raw: str
     jd_parsed: dict | None = None
+    jd_parse_pending: bool = False
     weights: dict | None = None
     thresholds: dict | None = None
     created_at: datetime
@@ -154,6 +155,9 @@ class ReasoningCard(BaseModel):
     criterion_reasons: dict[str, str] = Field(default_factory=dict)
     matched_skills: list[str] = Field(default_factory=list)
     summary: str = ""
+    # How close the score is to the nearest Fit/Maybe cutoff — "Low" means this verdict
+    # could easily flip with minor rubric variance and deserves a manual look before acting.
+    confidence: Literal["High", "Medium", "Low"] | None = None
     # Set only when the candidate could not be processed at all. A card with `error`
     # set is NOT a merit-based rejection and must never be presented as one.
     error: str | None = None
@@ -212,3 +216,25 @@ class ColumnPreviewResponse(BaseModel):
 
 class CancelPendingResponse(BaseModel):
     cancelled_count: int
+
+
+class JobProgress(BaseModel):
+    """Lightweight per-status counts for GET /jobs/{id}/progress — cheaper than fetching
+    full results just to render a progress bar, and safe to poll frequently."""
+
+    job_id: str
+    total: int
+    pending: int
+    processing: int
+    done: int
+    failed: int
+    last_updated: datetime | None = None
+
+
+class CreditRequestItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    status: str
+    created_at: datetime
+    resolved_at: datetime | None = None

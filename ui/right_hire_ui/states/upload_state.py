@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import reflex as rx
 
 from right_hire_ui import api_client
 from right_hire_ui.states.app_state import AppState
+
+_PROGRESS_POLL_SECONDS = 4
+_PROGRESS_POLL_MAX_ITERATIONS = 45  # ~3 minutes, matches a typical small-batch turnaround
 
 CANONICAL_FIELDS = ["name", "email", "resume_url", "yoe", "location"]
 FIELD_LABELS = {
@@ -14,6 +19,9 @@ FIELD_LABELS = {
     "yoe": "Years of Experience",
     "location": "Location",
 }
+# Must be non-empty for a row to be worth evaluating at all — kept in sync with the
+# "required"/"optional" badges rendered per-row in pages/upload_candidates.py.
+REQUIRED_FIELDS = ["name", "email"]
 
 
 class UploadState(AppState):
@@ -33,11 +41,33 @@ class UploadState(AppState):
     # mapping: canonical_field -> raw column name (empty string = unmapped)
     mapping: dict[str, str] = {}
 
+    # Live progress for the batch just uploaded — polled via GET /jobs/{id}/progress
+    # (cheap counts-only endpoint) rather than the full results list this page doesn't
+    # otherwise need. Cleared when the user starts a new upload.
+    progress: dict = {}  # noqa: RUF012
+    show_progress: bool = False
+
     def set_selected_job_id(self, value: str) -> None:
         self.selected_job_id = value
 
     def set_mapping_field(self, field: str, value: str) -> None:
         self.mapping[field] = value
+
+    @rx.var
+    def missing_required_fields(self) -> list[str]:
+        return [f for f in REQUIRED_FIELDS if not self.mapping.get(f)]
+
+    @rx.var
+    def mapping_error(self) -> str:
+        missing = self.missing_required_fields
+        if not missing:
+            return ""
+        labels = ", ".join(FIELD_LABELS.get(f, f) for f in missing)
+        return f"Map a column for {labels} before uploading — these fields are required."
+
+    @rx.var
+    def mapping_is_valid(self) -> bool:
+        return not self.missing_required_fields
 
     def cancel_mapping(self) -> None:
         self.show_mapping = False
@@ -55,6 +85,8 @@ class UploadState(AppState):
         self.upload_result_message = ""
         self.upload_error = ""
         self.show_mapping = False
+        self.show_progress = False
+        self.progress = {}
         self.is_previewing = True
         yield
 
@@ -87,6 +119,10 @@ class UploadState(AppState):
     async def confirm_upload(self):
         if not self._pending_filename:
             return
+        if not self.mapping_is_valid:
+            self.upload_error = self.mapping_error
+            yield rx.toast.error(self.upload_error)
+            return
 
         self.is_uploading = True
         self.upload_error = ""
@@ -115,8 +151,34 @@ class UploadState(AppState):
             self._pending_data = b""
             await self.load_credits()
             yield rx.toast.success(self.upload_result_message)
+            self.show_progress = True
+            yield UploadState.poll_progress
         except (httpx.HTTPError, api_client.ApiError) as e:
             self.upload_error = str(e)
             yield rx.toast.error(self.upload_error)
         finally:
             self.is_uploading = False
+
+    @rx.event(background=True)
+    async def poll_progress(self):
+        """Live pending/processing/done/failed counts for the job just uploaded to,
+        via the lightweight GET /jobs/{id}/progress endpoint (see app/api/jobs.py)."""
+        async with self:
+            job_id = self.selected_job_id
+            api_key = self.api_key
+        if not job_id:
+            return
+
+        for _ in range(_PROGRESS_POLL_MAX_ITERATIONS):
+            try:
+                progress = await api_client.get_job_progress(api_key, job_id)
+            except (httpx.HTTPError, api_client.ApiError):
+                await asyncio.sleep(_PROGRESS_POLL_SECONDS)
+                continue
+
+            async with self:
+                self.progress = progress
+                still_active = progress.get("pending", 0) > 0 or progress.get("processing", 0) > 0
+            if not still_active:
+                return
+            await asyncio.sleep(_PROGRESS_POLL_SECONDS)

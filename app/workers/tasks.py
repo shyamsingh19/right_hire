@@ -92,6 +92,32 @@ def _get_redis():
     return redis_lib.from_url(settings.effective_redis_url, decode_responses=True)
 
 
+def parse_job_description(job_id: str) -> None:
+    """Deferred JD parse for a job created while the LLM backend was down (see
+    app/api/jobs.py:create_job's LLMUnavailableError fallback). Runs inside an RQ
+    worker; leaves jd_parse_pending=True on failure so RQ's own retry policy —
+    passed at enqueue time — can try again rather than silently giving up.
+    """
+    session = _sync_session()
+    try:
+        job = session.get(Job, job_id)
+        if not job:
+            logger.error("parse_job_description: missing job=%s", job_id)
+            return
+        if not job.jd_parse_pending:
+            return  # already parsed (e.g. a retried enqueue landed twice)
+
+        provider = get_provider()
+        parsed = parse_jd(job.jd_raw, provider)
+        job.jd_parsed = parsed.model_dump()
+        job.jd_parse_pending = False
+        session.commit()
+    except Exception as exc:
+        logger.warning("parse_job_description failed for job=%s: %s", job_id, exc)
+    finally:
+        session.close()
+
+
 def process_candidate(candidate_id: str, job_id: str) -> None:
     """Full pipeline for a single candidate. Runs inside an RQ worker."""
     session = _sync_session()

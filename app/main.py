@@ -4,6 +4,8 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app import db
 from app.config import settings
+from app.llm.base import LLMUnavailableError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,6 +82,27 @@ async def request_id_and_timing(request: Request, call_next):
     return response
 
 
+@app.exception_handler(LLMUnavailableError)
+async def llm_unavailable_handler(request: Request, exc: LLMUnavailableError):
+    """The LLM backend (Ollama/Groq/OpenAI) is down or misconfigured. Return a clean 503
+    instead of a raw 500 — the caller can retry, this isn't a bug in the request itself."""
+    request_id = request.headers.get("X-Request-ID", "unknown")
+    logger.warning(
+        "LLM unavailable on %s %s (request_id=%s): %s",
+        request.method,
+        request.url.path,
+        request_id,
+        exc,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "The AI model backend is temporarily unavailable. Please try again shortly.",
+            "request_id": request_id,
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     request_id = request.headers.get("X-Request-ID", "unknown")
@@ -107,6 +131,38 @@ _LLM_HEALTH_TTL_SECONDS = 30
 _llm_health_cache: tuple[float, str] | None = None
 
 
+def _host_port(url: str) -> str:
+    """host[:port] only — /health has no auth (see CLAUDE.md), so URLs with embedded
+    credentials (DATABASE_URL, Upstash REST token) must never appear in the response."""
+    try:
+        parts = urlsplit(url)
+        if not parts.hostname:
+            return "unknown"
+        return f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname
+    except Exception:
+        return "unknown"
+
+
+def _llm_target() -> dict[str, str]:
+    """Backend + the specific host/model this deployment is configured to hit."""
+    backend = settings.llm_backend.lower().strip()
+    if backend == "local":
+        return {
+            "backend": backend,
+            "target": _host_port(settings.ollama_url),
+            "model": settings.judge_model,
+        }
+    if backend == "groq":
+        return {
+            "backend": backend,
+            "target": "api.groq.com",
+            "model": settings.cascade_model or "llama3-8b-8192",
+        }
+    if backend == "openai":
+        return {"backend": backend, "target": "api.openai.com", "model": "gpt-4o-mini"}
+    return {"backend": backend, "target": "unknown", "model": "unknown"}
+
+
 def _check_llm() -> str:
     """Returns 'ok' or an 'error: ...' string. Never raises."""
     global _llm_health_cache
@@ -124,6 +180,21 @@ def _check_llm() -> str:
 
     _llm_health_cache = (now, result)
     return result
+
+
+def _check_storage() -> str:
+    """STORAGE_DIR must exist and be writable — resumes attached via the UI/API land
+    there (see app/pipeline/ingest.py:save_resume), and a bad mount fails silently
+    otherwise until the first upload."""
+    try:
+        root = Path(settings.storage_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        probe = root / ".health_check"
+        probe.write_text("ok")
+        probe.unlink()
+        return "ok"
+    except Exception as exc:
+        return f"error: {exc}"[:200]
 
 
 @app.get("/health")
@@ -147,9 +218,21 @@ async def health():
         checks["redis"] = f"error: {exc}"[:200]
 
     checks["llm"] = await run_in_threadpool(_check_llm)
+    checks["storage"] = await run_in_threadpool(_check_storage)
 
     healthy = all(v == "ok" for v in checks.values())
+    llm_target = _llm_target()
     return JSONResponse(
         status_code=200 if healthy else 503,
-        content={"status": "ok" if healthy else "degraded", "checks": checks},
+        content={
+            "status": "ok" if healthy else "degraded",
+            "checks": checks,
+            "targets": {
+                "db": _host_port(settings.database_url),
+                "redis": _host_port(settings.effective_redis_url)
+                + (" (upstash)" if settings.effective_redis_url != settings.redis_url else ""),
+                "llm": llm_target,
+                "storage_dir": settings.storage_dir,
+            },
+        },
     )
