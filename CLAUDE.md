@@ -335,7 +335,10 @@ def test_something(fake_provider):
 | `REDIS_URL` | `redis://localhost:6379/0` | Queue + verdict cache |
 | `STORAGE_DIR` | `./storage` | Resume file storage path |
 | `GROQ_API_KEY` | _(empty)_ | Required when `LLM_BACKEND=groq` |
+| `CASCADE_MODEL` | `llama-3.3-70b-versatile` | Chat model used by `GroqProvider` — Groq periodically decommissions older models (e.g. `llama3-8b-8192`), check https://console.groq.com/docs/deprecations if calls start 400ing |
 | `OPENAI_API_KEY` | _(empty)_ | Required when `LLM_BACKEND=openai` |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Chat model used by `OpenAIProvider` |
+| `OPENAI_EMBED_MODEL` | `text-embedding-3-small` | Embedding model used by `OpenAIProvider.embed()` |
 | `CORS_ORIGINS` | `*` | Comma-separated allowlist, e.g. `https://app.example.com,http://localhost:3000` — a startup warning logs if left as `*` |
 | `MAX_UPLOAD_MB` | `10` | Hard cap on candidate-sheet and resume-file upload size |
 | `AUTO_CREATE_TABLES` | `true` | Dev convenience via `create_all`; auto-skipped (with a warning) if an `alembic_version` table already exists |

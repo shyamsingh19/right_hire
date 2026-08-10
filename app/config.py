@@ -18,8 +18,10 @@ class Settings(BaseSettings):
     judge_max_tokens: int = 200
     embed_model: str = "all-MiniLM-L6-v2"
     groq_api_key: str = ""
-    cascade_model: str = ""
+    cascade_model: str = "llama-3.3-70b-versatile"
     openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_embed_model: str = "text-embedding-3-small"
 
     # Storage
     database_url: str = "mysql+pymysql://ats:ats@localhost:3306/ats"

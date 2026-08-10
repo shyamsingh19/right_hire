@@ -9,7 +9,6 @@ from app.llm.base import LLMProvider, LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
-_EMBED_MODEL = "text-embedding-3-small"
 _HEALTH_TIMEOUT = 5.0
 
 
@@ -19,7 +18,7 @@ class OpenAIProvider(LLMProvider):
     def __init__(self, model: str | None = None) -> None:
         import openai  # noqa: F401 — validate it's installed at construction time
 
-        self.model = model or "gpt-4o-mini"
+        self.model = model or settings.openai_model
         self.api_key = settings.openai_api_key
         if not self.api_key:
             raise LLMUnavailableError("OPENAI_API_KEY is not set — LLM_BACKEND=openai requires it")
@@ -69,7 +68,7 @@ class OpenAIProvider(LLMProvider):
         client = OpenAI(api_key=self.api_key)
         try:
             response = client.embeddings.create(
-                model=_EMBED_MODEL,
+                model=settings.openai_embed_model,
                 input=texts,
             )
         except Exception as exc:

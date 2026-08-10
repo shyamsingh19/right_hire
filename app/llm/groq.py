@@ -19,7 +19,7 @@ class GroqProvider(LLMProvider):
     """LLM provider backed by Groq's inference API (OpenAI-compatible)."""
 
     def __init__(self, model: str | None = None) -> None:
-        self.model = model or settings.cascade_model or "llama3-8b-8192"
+        self.model = model or settings.cascade_model
         self.api_key = settings.groq_api_key
         if not self.api_key:
             raise LLMUnavailableError("GROQ_API_KEY is not set — LLM_BACKEND=groq requires it")
