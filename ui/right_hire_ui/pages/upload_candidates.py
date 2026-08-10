@@ -14,10 +14,7 @@ UPLOAD_ID = "candidate_upload"
 def _mapping_row(field: str) -> rx.Component:
     label = FIELD_LABELS.get(field, field)
     required = (field == "name") | (field == "email")
-    # `required` is a plain bool (field is a static string, not a Var) — `and` short-circuits
-    # to False without evaluating the Var for optional fields, and to the Var itself for
-    # required ones, so this stays reactive only where it needs to be.
-    unmapped = required and (UploadState.mapping[field] == "")
+    unmapped = required & (UploadState.mapping[field] == "")
     return rx.vstack(
         rx.hstack(
             rx.vstack(
