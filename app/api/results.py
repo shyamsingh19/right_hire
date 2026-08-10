@@ -63,12 +63,17 @@ def _friendly_error(raw: str | None) -> str:
         )
     if "failed to queue" in lowered:
         return "This candidate was never queued for processing. Re-queue them to try again."
-    if "complete_json failed" in lowered or "embed failed" in lowered:
-        # Infrastructure, not the candidate — say so, and keep the technical detail for
-        # whoever has to fix it rather than hiding it behind a vague message.
+    if (
+        "complete_json failed" in lowered
+        or "embed failed" in lowered
+        or "llm provider unavailable" in lowered
+    ):
+        # Infrastructure, not the candidate — say so, but don't leak backend/provider
+        # jargon to a recruiter. The technical detail (backend, model, real exception)
+        # is in the worker logs — see app/pipeline/parse.py's logger.warning calls.
         return (
             "The AI model couldn't complete this evaluation — this is a system issue, not "
-            f"a reflection of the candidate. Re-queue them to retry. Details: {text}"
+            "a reflection of the candidate. Re-queue them to retry."
         )
     return f"Processing failed: {text}"
 

@@ -46,7 +46,13 @@ def judge_candidate(
     try:
         return provider.complete_json(prompt, JudgeOutput, max_tokens=300)
     except Exception as exc:
-        logger.error("Judge LLM call failed: %s", exc)
+        logger.error(
+            "Judge LLM call failed [backend=%s model=%s]: %s",
+            type(provider).__name__,
+            getattr(provider, "model", "?"),
+            exc,
+            exc_info=True,
+        )
         # Graceful fallback: derive verdict from skill_overlap
         overlap = matched.get("skill_overlap", 0.0)
         score = round(float(overlap), 4)

@@ -99,7 +99,13 @@ def parse_resume(text: str, provider: LLMProvider) -> ParsedResume:
     try:
         return provider.complete_json(prompt, ParsedResume, max_tokens=512)
     except Exception as exc:  # normalize any provider error
-        logger.warning("LLM provider failed while parsing resume: %s", exc)
+        logger.warning(
+            "LLM provider failed while parsing resume [backend=%s model=%s]: %s",
+            type(provider).__name__,
+            getattr(provider, "model", "?"),
+            exc,
+            exc_info=True,
+        )
         raise LLMUnavailableError("LLM provider unavailable for resume parsing") from exc
 
 
@@ -110,5 +116,11 @@ def parse_jd(jd_raw: str, provider: LLMProvider) -> ParsedJD:
     try:
         return provider.complete_json(prompt, ParsedJD, max_tokens=512)
     except Exception as exc:  # normalize any provider error
-        logger.warning("LLM provider failed while parsing JD: %s", exc)
+        logger.warning(
+            "LLM provider failed while parsing JD [backend=%s model=%s]: %s",
+            type(provider).__name__,
+            getattr(provider, "model", "?"),
+            exc,
+            exc_info=True,
+        )
         raise LLMUnavailableError("LLM provider unavailable for JD parsing") from exc
