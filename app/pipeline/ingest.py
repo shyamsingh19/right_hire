@@ -229,11 +229,97 @@ def _drive_to_direct(url: str) -> str:
     return url
 
 
+_DRIVE_SIGNIN_MARKERS = (
+    b"Sign in to continue to Google Drive",
+    b"accounts.google.com/ServiceLogin",
+    b"drive-viewer-error",
+)
+
+
+def _looks_like_signin_bytes(head: bytes) -> bool:
+    lowered = head.lstrip().lower()
+    if not (lowered.startswith(b"<!doctype html") or lowered.startswith(b"<html")):
+        return False
+    return any(marker.lower() in head.lower() for marker in _DRIVE_SIGNIN_MARKERS)
+
+
+def _is_drive_signin_page(dest_path: str) -> bool:
+    """Detect a Google 'sign in' / permission-denied HTML page saved in place of a file.
+
+    Happens when a Drive file isn't shared as "Anyone with the link" — gdown/http
+    downloads the login page instead of erroring, and it would otherwise sail through
+    downstream parsing as if it were real resume content (MuPDF can parse HTML too).
+    """
+    try:
+        head = Path(dest_path).read_bytes()[:4096]
+    except OSError:
+        return False
+    return _looks_like_signin_bytes(head)
+
+
+def check_drive_link_access(url: str) -> None:
+    """Robustly determine whether a Google Drive link is public *before* downloading it.
+
+    Streams only the first few KB from the direct-download URL — no full download, no
+    gdown, no text extraction. Two independent signals decide private vs public:
+
+    1. Redirect target: Google bounces unauthenticated requests for private files to
+       `accounts.google.com` (the sign-in host) — this is true regardless of response
+       body content, so it's the more reliable signal.
+    2. Response body: even without a redirect, Google sometimes serves an HTML page
+       containing sign-in markers directly at the drive.google.com host.
+
+    Raises RuntimeError immediately (before any download/parse attempt) if either signal
+    fires. Non-Drive URLs are not checked here — plain HTTP links go straight to
+    `_http_download` and get validated post-download instead.
+    """
+    if not _is_drive_url(url):
+        return
+
+    direct_url = _drive_to_direct(url)
+    try:
+        with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+            with client.stream("GET", direct_url) as resp:
+                final_host = (resp.url.host or "").lower()
+                content_type = resp.headers.get("content-type", "")
+                head = b""
+                for chunk in resp.iter_bytes(chunk_size=4096):
+                    head += chunk
+                    break
+    except httpx.HTTPError as exc:
+        # Can't determine access from a failed probe request — let the real download
+        # attempt (with its own retries/fallback) surface the actual error.
+        logger.warning("Drive accessibility pre-check failed for %r (%s); proceeding", url, exc)
+        return
+
+    is_private = "accounts.google.com" in final_host or (
+        "text/html" in content_type.lower() and _looks_like_signin_bytes(head)
+    )
+    if is_private:
+        message = (
+            f"Google Drive link is PRIVATE: {url!r} requires sign-in. Share it as "
+            "'Anyone with the link can view' and retry — this candidate was not "
+            "downloaded or parsed."
+        )
+        logger.error(message)
+        raise RuntimeError(message)
+
+    logger.info("Google Drive link is public, proceeding to download: %r", url)
+
+
 def fetch_drive_file(url: str, dest_path: str) -> str:
     """Download a file from Google Drive or a direct URL to *dest_path*.
 
     Returns the local path.
+
+    Raises RuntimeError if the link is private (checked up front by
+    `check_drive_link_access`, before any download is attempted) or if the downloaded
+    content turns out to be Google's sign-in/permission-denied page rather than the
+    actual file — this happens silently otherwise, since that page is valid HTML and
+    downstream text extraction can parse it without error.
     """
+    check_drive_link_access(url)
+
     Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
 
     if _is_drive_url(url):
@@ -241,15 +327,23 @@ def fetch_drive_file(url: str, dest_path: str) -> str:
             import gdown
 
             gdown.download(url, dest_path, quiet=True, fuzzy=True)
-            return dest_path
+            if _is_drive_signin_page(dest_path):
+                raise RuntimeError("gdown returned Google's sign-in page")
         except Exception as exc:
             logger.warning("gdown failed (%s), falling back to direct download", exc)
             direct_url = _drive_to_direct(url)
             _http_download(direct_url, dest_path)
-            return dest_path
     else:
         _http_download(url, dest_path)
-        return dest_path
+
+    if _is_drive_signin_page(dest_path):
+        raise RuntimeError(
+            f"Could not download resume from {url!r}: Google Drive returned a sign-in "
+            "page instead of the file. The file must be shared as 'Anyone with the "
+            "link can view' — a private/restricted sharing setting blocks automated "
+            "download."
+        )
+    return dest_path
 
 
 def _http_download(url: str, dest_path: str) -> None:
