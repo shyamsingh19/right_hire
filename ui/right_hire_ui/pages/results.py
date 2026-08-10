@@ -27,6 +27,8 @@ def _verdict_filter_select() -> rx.Component:
         ),
         value=ResultsState.verdict_filter,
         on_change=ResultsState.set_verdict_filter,
+        width="140px",
+        flex_shrink="0",
     )
 
 
@@ -629,7 +631,7 @@ def _processing_status_banner() -> rx.Component:
                     color_scheme="red",
                 ),
             ),
-            padding="3",
+            padding="1.25em 1.75em",
             border=f"1px solid {rx.color('violet', 5)}",
             border_radius="var(--radius-3)",
             background=rx.color("violet", 2),
@@ -742,10 +744,14 @@ def results_page() -> rx.Component:
                 empty_state("No jobs found. Create one on the 'Create Job' page first."),
                 rx.vstack(
                     rx.hstack(
-                        job_picker(
-                            ResultsState.job_options,
-                            ResultsState.selected_job_id,
-                            ResultsState.set_selected_job_id,
+                        rx.box(
+                            job_picker(
+                                ResultsState.job_options,
+                                ResultsState.selected_job_id,
+                                ResultsState.set_selected_job_id,
+                            ),
+                            flex="1",
+                            min_width="0",
                         ),
                         _verdict_filter_select(),
                         width="100%",
