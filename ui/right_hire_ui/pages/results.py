@@ -300,6 +300,80 @@ def _attach_resume_block() -> rx.Component:
 # ── Page ──────────────────────────────────────────────────────────────────────
 
 
+def _processing_status_banner() -> rx.Component:
+    """Live status bar shown while any candidates are pending or processing.
+
+    Displays per-status counts, a spinner, and a Cancel button that marks all
+    pending candidates as cancelled (processing ones are mid-flight and unaffected).
+    """
+    return rx.cond(
+        ResultsState.has_loaded & ResultsState.has_active,
+        rx.hstack(
+            rx.spinner(size="2", color=rx.color("violet", 9)),
+            rx.vstack(
+                rx.text(
+                    "Processing in progress",
+                    size="2",
+                    weight="medium",
+                ),
+                rx.hstack(
+                    rx.cond(
+                        ResultsState.pending_count > 0,
+                        rx.badge(
+                            rx.icon("clock", size=10),
+                            ResultsState.pending_count.to(str) + " pending",
+                            color_scheme="gray",
+                            variant="soft",
+                            size="1",
+                        ),
+                    ),
+                    rx.cond(
+                        ResultsState.processing_count > 0,
+                        rx.badge(
+                            rx.icon("loader", size=10),
+                            ResultsState.processing_count.to(str) + " processing",
+                            color_scheme="blue",
+                            variant="soft",
+                            size="1",
+                        ),
+                    ),
+                    rx.badge(
+                        rx.icon("check", size=10),
+                        ResultsState.done_count.to(str) + " done",
+                        color_scheme="green",
+                        variant="soft",
+                        size="1",
+                    ),
+                    spacing="2",
+                    align="center",
+                    flex_wrap="wrap",
+                ),
+                spacing="1",
+            ),
+            rx.spacer(),
+            rx.cond(
+                ResultsState.pending_count > 0,
+                rx.button(
+                    rx.icon("circle-x", size=14),
+                    "Cancel pending",
+                    on_click=ResultsState.cancel_pending,
+                    loading=ResultsState.is_cancelling,
+                    size="2",
+                    variant="soft",
+                    color_scheme="red",
+                ),
+            ),
+            padding="3",
+            border=f"1px solid {rx.color('violet', 5)}",
+            border_radius="var(--radius-3)",
+            background=rx.color("violet", 2),
+            width="100%",
+            align="center",
+            spacing="3",
+        ),
+    )
+
+
 def results_page() -> rx.Component:
     return page_shell(
         section_card(
@@ -337,6 +411,7 @@ def results_page() -> rx.Component:
                         spacing="3",
                         width="fit-content",
                     ),
+                    _processing_status_banner(),
                     rx.cond(
                         ResultsState.load_error != "",
                         rx.callout(

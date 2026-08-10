@@ -153,6 +153,32 @@ class ResultsState(AppState):
             for item in self.results
         ]
 
+    async def cancel_pending(self):
+        """Mark all queued-but-not-started candidates as cancelled.
+
+        Only 'pending' candidates are affected — ones already picked up by a worker
+        are mid-flight and cannot be interrupted without killing the worker process.
+        """
+        if not self.selected_job_id:
+            return
+        self.is_cancelling = True
+        yield
+        try:
+            result = await api_client.cancel_pending_candidates(
+                self.api_key, self.selected_job_id
+            )
+            n = result.get("cancelled_count", 0)
+            if n:
+                yield rx.toast.info(f"Cancelled {n} pending candidate{'s' if n != 1 else ''}.")
+            else:
+                yield rx.toast.info("No pending candidates to cancel.")
+            # Refresh so the UI reflects the new 'failed' statuses immediately
+            await self.load_results()
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Cancel failed: {e}")
+        finally:
+            self.is_cancelling = False
+
     async def export_csv(self):
         if not self.selected_job_id:
             return
