@@ -20,6 +20,8 @@ COPY grammars ./grammars
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY supervisord.conf ./
+COPY start.sh ./
+RUN chmod +x start.sh
 
 RUN pip install --no-cache-dir -e .
 

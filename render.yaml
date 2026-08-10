@@ -8,7 +8,7 @@ services:
     # for local dev) to run supervisord instead, which starts uvicorn AND the RQ worker
     # as one process group. Render's free tier only offers Web Services, not Background
     # Workers, so this is what keeps candidate processing free.
-    dockerCommand: sh -c "alembic upgrade head && supervisord -c /app/supervisord.conf -n"
+    dockerCommand: ./start.sh
     plan: free
     healthCheckPath: /health
     envVars:
