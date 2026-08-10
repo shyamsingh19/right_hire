@@ -38,7 +38,7 @@ def _nav_link(route: str, label: str, icon: str) -> rx.Component:
 def _credits_block() -> rx.Component:
     """1 credit = 1 candidate evaluated. Top-ups are approved by a human out-of-band,
     so this only asks — it never charges (see app/api/billing.py)."""
-    out_of_credits = AppState.credits <= 0
+    out_of_credits = (AppState.credits == "0") | (AppState.credits == "")
     return rx.vstack(
         rx.hstack(
             rx.icon("coins", size=14, color=rx.color("amber", 9)),
@@ -48,7 +48,7 @@ def _credits_block() -> rx.Component:
                 AppState.is_loading_account,
                 rx.spinner(size="1"),
                 rx.badge(
-                    AppState.credits.to_string(),
+                    AppState.credits,
                     variant="soft",
                     color_scheme=rx.cond(out_of_credits, "red", "grass"),
                     size="1",

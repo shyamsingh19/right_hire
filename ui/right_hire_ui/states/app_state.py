@@ -20,8 +20,9 @@ class AppState(rx.State):
     is_authenticating: bool = False
 
     # Persisted so sidebar shows correct values instantly on page load without a flash.
+    # LocalStorage always deserializes as str, so credits is kept as str here.
     user_email: str = rx.LocalStorage(name="right_hire_user_email")
-    credits: int = rx.LocalStorage(name="right_hire_credits")
+    credits: str = rx.LocalStorage(name="right_hire_credits")
     is_loading_account: bool = False
     credits_message: str = ""
     payment_link: str = ""
@@ -42,7 +43,7 @@ class AppState(rx.State):
     def log_out(self) -> None:
         self.api_key = ""
         self.jobs = []
-        self.credits = 0  # type: ignore[assignment]
+        self.credits = "0"
         self.user_email = ""
         self.credits_message = ""
         self.payment_link = ""
@@ -61,14 +62,14 @@ class AppState(rx.State):
 
     async def load_credits(self) -> None:
         if not self.api_key:
-            self.credits = 0
+            self.credits = "0"
             return
         try:
             data = await api_client.get_me(self.api_key)
-            self.credits = data["credits"]
+            self.credits = str(data["credits"])
             self.user_email = data["email"]
         except (httpx.HTTPError, api_client.ApiError):
-            self.credits = 0
+            pass  # keep cached value on network error
 
     async def request_credits(self):
         if not self.api_key:
@@ -94,7 +95,7 @@ class AppState(rx.State):
             result = await api_client.signup(self.signup_email.strip())
             self.api_key = result["api_key"]
             self.user_email = result.get("email", "")
-            self.credits = result.get("credits", 0)
+            self.credits = str(result.get("credits", 0))
             self.signup_email = ""
             yield rx.toast.success("Signed up — API key saved in this browser.")
         except (httpx.HTTPError, api_client.ApiError) as e:
