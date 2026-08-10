@@ -458,7 +458,7 @@ class ResultsState(AppState):
             if "Google Drive link is PRIVATE" in err:
                 label = "Private Google Drive link"
             elif "LLM provider unavailable" in err:
-                label = "LLM provider unavailable"
+                label = "Temporarily unavailable — retry processing"
             elif err:
                 label = "Other error"
             else:
