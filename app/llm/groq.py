@@ -57,12 +57,21 @@ class GroqProvider(LLMProvider):
                     ),
                     mode=instructor.Mode.JSON,
                 )
-                return client.chat.completions.create(
+                result, completion = client.chat.completions.create_with_completion(
                     model=self.model,
                     max_tokens=max_tokens,
                     response_model=schema,
                     messages=[{"role": "user", "content": prompt}],
                 )
+                usage = completion.usage
+                logger.info(
+                    "GroqProvider.complete_json tokens — model=%s prompt=%d completion=%d total=%d",
+                    self.model,
+                    usage.prompt_tokens,
+                    usage.completion_tokens,
+                    usage.total_tokens,
+                )
+                return result
             except ImportError:
                 # Fallback: raw httpx call if instructor/openai not available
                 schema_hint = json.dumps(schema.model_json_schema(), indent=2)
@@ -85,7 +94,17 @@ class GroqProvider(LLMProvider):
                         headers=headers,
                     )
                     resp.raise_for_status()
-                    content = resp.json()["choices"][0]["message"]["content"]
+                    data = resp.json()
+                    content = data["choices"][0]["message"]["content"]
+                    usage = data.get("usage", {})
+                    logger.info(
+                        "GroqProvider.complete_json tokens (raw) — model=%s prompt=%s "
+                        "completion=%s total=%s",
+                        self.model,
+                        usage.get("prompt_tokens"),
+                        usage.get("completion_tokens"),
+                        usage.get("total_tokens"),
+                    )
                     return schema.model_validate(json.loads(content))
         except httpx.HTTPError as exc:
             raise LLMUnavailableError(f"GroqProvider.complete_json unreachable: {exc}") from exc

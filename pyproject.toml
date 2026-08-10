@@ -42,6 +42,7 @@ dev = [
     "factory-boy",
     "pytest-cov",
     "ruff",
+    "tiktoken",
 ]
 
 [tool.setuptools.packages.find]

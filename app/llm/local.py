@@ -83,6 +83,18 @@ class LocalProvider(LLMProvider):
                     data = resp.json()
                     content = data["message"]["content"]
                     parsed = json.loads(content)
+                    prompt_tokens = data.get("prompt_eval_count")
+                    completion_tokens = data.get("eval_count")
+                    logger.info(
+                        "LocalProvider.complete_json tokens — model=%s prompt=%s "
+                        "completion=%s total=%s",
+                        self.model,
+                        prompt_tokens,
+                        completion_tokens,
+                        (prompt_tokens or 0) + (completion_tokens or 0)
+                        if prompt_tokens is not None or completion_tokens is not None
+                        else None,
+                    )
                     return schema.model_validate(parsed)
             except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
                 last_exc = exc

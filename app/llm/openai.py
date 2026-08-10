@@ -49,13 +49,22 @@ class OpenAIProvider(LLMProvider):
             mode=instructor.Mode.JSON,
         )
         try:
-            return client.chat.completions.create(
+            result, completion = client.chat.completions.create_with_completion(
                 model=self.model,
                 max_tokens=max_tokens,
                 response_model=schema,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
             )
+            usage = completion.usage
+            logger.info(
+                "OpenAIProvider.complete_json tokens — model=%s prompt=%d completion=%d total=%d",
+                self.model,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                usage.total_tokens,
+            )
+            return result
         except Exception as exc:
             if type(exc).__module__.startswith("openai"):
                 raise LLMUnavailableError(f"OpenAIProvider.complete_json failed: {exc}") from exc
@@ -75,6 +84,13 @@ class OpenAIProvider(LLMProvider):
             if type(exc).__module__.startswith("openai"):
                 raise LLMUnavailableError(f"OpenAIProvider.embed failed: {exc}") from exc
             raise
+        logger.info(
+            "OpenAIProvider.embed tokens — model=%s prompt=%d total=%d texts=%d",
+            settings.openai_embed_model,
+            response.usage.prompt_tokens,
+            response.usage.total_tokens,
+            len(texts),
+        )
         # Sort by index to guarantee order matches input
         items = sorted(response.data, key=lambda x: x.index)
         return [item.embedding for item in items]
