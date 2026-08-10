@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,6 +98,27 @@ async def get_job(
     if not job or job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
     return await _job_response(db, job)
+
+
+@router.delete("/{job_id}", status_code=204)
+async def delete_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete a job and all its candidates and evaluations."""
+    job = await _get_owned_job(db, job_id, user)
+
+    # Must delete evaluations before candidates (no DB-level cascade)
+    cand_ids_result = await db.execute(select(Candidate.id).where(Candidate.job_id == job_id))
+    cand_ids = [r for r in cand_ids_result.scalars().all()]
+
+    if cand_ids:
+        await db.execute(sa_delete(Evaluation).where(Evaluation.candidate_id.in_(cand_ids)))
+
+    await db.execute(sa_delete(Candidate).where(Candidate.job_id == job_id))
+    await db.delete(job)
+    await db.commit()
 
 
 async def _get_owned_job(db: AsyncSession, job_id: str, user: User) -> Job:

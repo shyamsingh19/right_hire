@@ -19,11 +19,10 @@ class AppState(rx.State):
     auth_error: str = ""
     is_authenticating: bool = False
 
-    user_email: str = ""
+    # Persisted so sidebar shows correct values instantly on page load without a flash.
+    user_email: str = rx.LocalStorage(name="right_hire_user_email")
+    credits: int = rx.LocalStorage(name="right_hire_credits")
     is_loading_account: bool = False
-
-    # Billing — 1 credit = 1 candidate evaluated (see app/api/billing.py)
-    credits: int = 0
     credits_message: str = ""
     payment_link: str = ""
 
@@ -43,7 +42,7 @@ class AppState(rx.State):
     def log_out(self) -> None:
         self.api_key = ""
         self.jobs = []
-        self.credits = 0
+        self.credits = 0  # type: ignore[assignment]
         self.user_email = ""
         self.credits_message = ""
         self.payment_link = ""
@@ -113,13 +112,16 @@ class AppState(rx.State):
         except (httpx.HTTPError, api_client.ApiError):
             self.jobs = []
 
-    async def load_page_data(self) -> None:
-        """on_load for every page — loads jobs + account info before rendering the sidebar."""
-        self.is_loading_account = True
-        yield
+    async def load_page_data(self):
+        """on_load for every page — jobs list is always fetched fresh; credits come from
+        LocalStorage immediately (no flash) and are refreshed in the background."""
         await self.load_jobs()
-        await self.load_credits()
-        self.is_loading_account = False
+        # Refresh account data in background — cached values already visible from LocalStorage
+        if self.api_key:
+            self.is_loading_account = True
+            yield
+            await self.load_credits()
+            self.is_loading_account = False
 
     @rx.var
     def job_options(self) -> list[tuple[str, str]]:

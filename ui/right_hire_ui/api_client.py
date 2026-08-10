@@ -98,6 +98,14 @@ async def create_job(
         return resp.json()
 
 
+async def delete_job(api_key: str, job_id: str) -> None:
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(
+            f"{API_BASE}/jobs/{job_id}", headers=_headers(api_key), timeout=30
+        )
+        await _raise_for_status(resp)
+
+
 async def cancel_pending_candidates(api_key: str, job_id: str) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(

@@ -374,6 +374,42 @@ def _processing_status_banner() -> rx.Component:
     )
 
 
+def _delete_job_dialog() -> rx.Component:
+    """Confirm before deleting a job and all its data — this is irreversible."""
+    return rx.alert_dialog.root(
+        rx.alert_dialog.trigger(
+            rx.button(
+                rx.icon("trash-2", size=14),
+                "Delete job",
+                disabled=ResultsState.selected_job_id == "",
+                size="3",
+                variant="soft",
+                color_scheme="red",
+            ),
+        ),
+        rx.alert_dialog.content(
+            rx.alert_dialog.title("Delete this job?"),
+            rx.alert_dialog.description(
+                "All candidates and evaluation results for this job will be permanently deleted. "
+                "This cannot be undone.",
+            ),
+            rx.flex(
+                rx.alert_dialog.cancel(rx.button("Cancel", variant="soft", color_scheme="gray")),
+                rx.alert_dialog.action(
+                    rx.button(
+                        "Delete job",
+                        color_scheme="red",
+                        on_click=ResultsState.delete_job(ResultsState.selected_job_id),
+                    ),
+                ),
+                spacing="3",
+                justify="end",
+                margin_top="1em",
+            ),
+        ),
+    )
+
+
 def results_page() -> rx.Component:
     return page_shell(
         section_card(
@@ -408,6 +444,7 @@ def results_page() -> rx.Component:
                             size="3",
                             variant="soft",
                         ),
+                        _delete_job_dialog(),
                         spacing="3",
                         width="fit-content",
                     ),

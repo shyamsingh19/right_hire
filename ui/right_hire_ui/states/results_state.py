@@ -153,6 +153,18 @@ class ResultsState(AppState):
             for item in self.results
         ]
 
+    async def delete_job(self, job_id: str):
+        """Permanently delete the job and all its data, then clear the results view."""
+        try:
+            await api_client.delete_job(self.api_key, job_id)
+            self.jobs = [j for j in self.jobs if j["id"] != job_id]
+            self.results = []
+            self.has_loaded = False
+            self.selected_job_id = ""
+            yield rx.toast.success("Job deleted.")
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Delete failed: {e}")
+
     async def cancel_pending(self):
         """Mark all queued-but-not-started candidates as cancelled.
 
