@@ -141,6 +141,8 @@ class ResultsState(AppState):
     is_attaching: bool = False
     is_cancelling: bool = False
     is_deleting_all: bool = False
+    is_deleting_job: bool = False
+    deleting_candidate_id: str = ""
 
     batch_stats: dict = {}  # noqa: RUF012 — BatchStats.model_dump()
     is_loading_stats: bool = False
@@ -262,6 +264,8 @@ class ResultsState(AppState):
 
     async def delete_job(self, job_id: str):
         """Permanently delete the job and all its data, then clear the results view."""
+        self.is_deleting_job = True
+        yield
         try:
             await api_client.delete_job(self.api_key, job_id)
             self.jobs = [j for j in self.jobs if j["id"] != job_id]
@@ -271,6 +275,8 @@ class ResultsState(AppState):
             yield rx.toast.success("Job deleted.")
         except (httpx.HTTPError, api_client.ApiError) as e:
             yield rx.toast.error(f"Delete failed: {e}")
+        finally:
+            self.is_deleting_job = False
 
     async def cancel_pending(self):
         """Mark all queued-but-not-started candidates as cancelled.
@@ -318,6 +324,8 @@ class ResultsState(AppState):
         behind a confirm dialog since it's the GDPR-style deletion path."""
         if not self.selected_job_id:
             return
+        self.deleting_candidate_id = candidate_id
+        yield
         try:
             await api_client.delete_candidate(self.api_key, self.selected_job_id, candidate_id)
             self.results = [r for r in self.results if r["candidate"]["id"] != candidate_id]
@@ -325,6 +333,8 @@ class ResultsState(AppState):
             yield rx.toast.success("Candidate deleted.")
         except (httpx.HTTPError, api_client.ApiError) as e:
             yield rx.toast.error(f"Delete failed: {e}")
+        finally:
+            self.deleting_candidate_id = ""
 
     async def delete_all_candidates(self):
         """Wipe every candidate for the selected job, keeping the job (JD, weights,

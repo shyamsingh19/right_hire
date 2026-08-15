@@ -254,7 +254,6 @@ def _inspector_left(row: dict) -> rx.Component:
                 width="100%",
             ),
         ),
-        rx.text(f"Model: {row['model_used'].to(str)}", size="1", color=rx.color("gray", 10)),
         spacing="3",
         width="100%",
         align="start",
@@ -389,7 +388,6 @@ def _result_content(row: dict) -> rx.Component:
                 has_eval,
                 rx.vstack(
                     rx.text(f"Score: {row['score_display'].to(str)}", size="2"),
-                    rx.text(f"Model: {row['model_used'].to(str)}", size="2"),
                     align="start",
                     spacing="1",
                 ),
@@ -461,6 +459,7 @@ def _delete_candidate_dialog(row: dict) -> rx.Component:
                         "Delete",
                         color_scheme="red",
                         on_click=ResultsState.delete_candidate(candidate_id),
+                        loading=ResultsState.deleting_candidate_id == candidate_id,
                     ),
                 ),
                 spacing="3",
@@ -725,6 +724,7 @@ def _delete_job_dialog() -> rx.Component:
                         "Delete job",
                         color_scheme="red",
                         on_click=ResultsState.delete_job(ResultsState.selected_job_id),
+                        loading=ResultsState.is_deleting_job,
                     ),
                 ),
                 spacing="3",
@@ -779,9 +779,12 @@ def results_page() -> rx.Component:
         section_card(
             "Evaluation Results",
             rx.cond(
-                ResultsState.jobs.length() == 0,
-                empty_state("No jobs found. Create one on the 'Create Job' page first."),
-                rx.vstack(
+                ResultsState.is_loading_jobs,
+                rx.center(rx.spinner(size="3"), padding="2em"),
+                rx.cond(
+                    ResultsState.jobs.length() == 0,
+                    empty_state("No jobs found. Create one on the 'Create Job' page first."),
+                    rx.vstack(
                     rx.hstack(
                         rx.box(
                             job_picker(
@@ -852,8 +855,9 @@ def results_page() -> rx.Component:
                             _attach_resume_block(),
                         ),
                     ),
-                    width="100%",
-                    spacing="4",
+                        width="100%",
+                        spacing="4",
+                    ),
                 ),
             ),
         ),

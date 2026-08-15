@@ -92,6 +92,7 @@ def _credits_block() -> rx.Component:
         rx.button(
             "Request more",
             on_click=AppState.request_credits,
+            loading=AppState.is_requesting_credits,
             size="1",
             variant="soft",
             width="100%",
@@ -154,6 +155,7 @@ def _account_widget() -> rx.Component:
                 rx.icon("refresh-cw", size=12),
                 "Rotate key",
                 on_click=AppState.rotate_key,
+                loading=AppState.is_rotating_key,
                 size="1",
                 variant="ghost",
                 width="100%",

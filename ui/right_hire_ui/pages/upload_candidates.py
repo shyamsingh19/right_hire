@@ -207,9 +207,12 @@ def upload_candidates_page() -> rx.Component:
         section_card(
             "Upload Candidates",
             rx.cond(
-                UploadState.jobs.length() == 0,
-                empty_state("No jobs found. Create one on the 'Create Job' page first."),
-                rx.vstack(
+                UploadState.is_loading_jobs,
+                rx.center(rx.spinner(size="3"), padding="2em"),
+                rx.cond(
+                    UploadState.jobs.length() == 0,
+                    empty_state("No jobs found. Create one on the 'Create Job' page first."),
+                    rx.vstack(
                     job_picker(
                         UploadState.job_options,
                         UploadState.selected_job_id,
@@ -284,9 +287,10 @@ def upload_candidates_page() -> rx.Component:
                             color_scheme="green",
                         ),
                     ),
-                    _progress_panel(),
-                    width="100%",
-                    spacing="4",
+                        _progress_panel(),
+                        width="100%",
+                        spacing="4",
+                    ),
                 ),
             ),
         ),

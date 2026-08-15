@@ -28,6 +28,9 @@ class AppState(rx.State):
     payment_link: str = ""
     support_contact: str = ""
     credit_requests: list[dict] = []  # noqa: RUF012
+    is_loading_jobs: bool = False
+    is_rotating_key: bool = False
+    is_requesting_credits: bool = False
 
     def set_signup_email(self, value: str) -> None:
         self.signup_email = value
@@ -57,12 +60,16 @@ class AppState(rx.State):
         new one is saved to localStorage immediately rather than shown for copying."""
         if not self.api_key:
             return
+        self.is_rotating_key = True
+        yield
         try:
             result = await api_client.rotate_key(self.api_key)
             self.api_key = result["api_key"]
             yield rx.toast.success("API key rotated — the previous key no longer works.")
         except (httpx.HTTPError, api_client.ApiError) as e:
             yield rx.toast.error(f"Could not rotate key: {e}")
+        finally:
+            self.is_rotating_key = False
 
     async def load_credits(self) -> None:
         if not self.api_key:
@@ -78,6 +85,8 @@ class AppState(rx.State):
     async def request_credits(self):
         if not self.api_key:
             return
+        self.is_requesting_credits = True
+        yield
         try:
             result = await api_client.request_credits(self.api_key)
             self.credits_message = result.get("message", "")
@@ -87,6 +96,8 @@ class AppState(rx.State):
             await self.load_credit_requests()
         except (httpx.HTTPError, api_client.ApiError) as e:
             yield rx.toast.error(str(e))
+        finally:
+            self.is_requesting_credits = False
 
     async def load_credit_requests(self) -> None:
         if not self.api_key:
@@ -135,7 +146,10 @@ class AppState(rx.State):
     async def load_page_data(self):
         """on_load for every page — jobs list is always fetched fresh; credits come from
         LocalStorage immediately (no flash) and are refreshed in the background."""
+        self.is_loading_jobs = True
+        yield
         await self.load_jobs()
+        self.is_loading_jobs = False
         # Refresh account data in background — cached values already visible from LocalStorage
         if self.api_key:
             self.is_loading_account = True
