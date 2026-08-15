@@ -64,8 +64,8 @@ def _mapping_row(field: str) -> rx.Component:
         ),
         spacing="1",
         width="100%",
-        padding_y="3",
-        padding_x="1",
+        padding_y="0.85em",
+        border_bottom=f"1px solid {rx.color('gray', 5)}",
     )
 
 
@@ -133,7 +133,7 @@ def _mapping_panel() -> rx.Component:
         ),
         width="100%",
         spacing="4",
-        padding="5",
+        padding="1.5em",
         border=f"1px solid {rx.color('violet', 5)}",
         border_radius="var(--radius-4)",
         background=rx.color("violet", 1),
