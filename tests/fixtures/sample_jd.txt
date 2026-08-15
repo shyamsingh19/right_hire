@@ -1,0 +1,27 @@
+Python Developer
+
+Schrödinger is seeking a Python Developer to join us in our mission to improve human health and quality of life through the development, distribution, and application of advanced computational methods!
+
+Schrödinger is on the cutting edge of computational drug discovery and materials science. Our platform is used by researchers and companies around the world and drives our own internal drug discovery projects.
+
+As a member of our Python Development team, you’ll play a key role in writing and maintaining GUI, workflow, and application code across a broad range of scientific products.
+
+Who Will Love This Job
+
+A Python programmer who’s passionate about building well-designed, well-tested, user-oriented software 
+A problem solver who enjoys translating complex scientific requirements into intuitive, performant software solutions
+An excellent communicator who loves collaborating in a diverse, interdisciplinary team environment
+
+What You’ll Do
+
+Write clear, highly-organized, maintainable Python code
+Adopt good software engineering practices and methodologies
+Design and build complex software with multiple interacting components
+Utilize the latest tools and practices to produce high-quality, clean code
+
+What You Should Have
+
+2 to 4 years of software development experience. While Python experience is preferred, we welcome engineers with strong backgrounds in C++, Java, JavaScript/React, or other development technologies who have basic exposure to Python and are eager to transition into a Python-focused role.
+Strong foundational knowledge of data structures, algorithms, and complex problem-solving.
+B.E. / B.Tech in Computer Science, Software Engineering, Mathematics, Physics, Chemistry, or any other stream.
+Experience in GUI development and/or large, complex codebases preferred, but not required

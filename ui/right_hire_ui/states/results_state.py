@@ -140,6 +140,7 @@ class ResultsState(AppState):
     is_exporting: bool = False
     is_attaching: bool = False
     is_cancelling: bool = False
+    is_deleting_all: bool = False
 
     batch_stats: dict = {}  # noqa: RUF012 — BatchStats.model_dump()
     is_loading_stats: bool = False
@@ -324,6 +325,29 @@ class ResultsState(AppState):
             yield rx.toast.success("Candidate deleted.")
         except (httpx.HTTPError, api_client.ApiError) as e:
             yield rx.toast.error(f"Delete failed: {e}")
+
+    async def delete_all_candidates(self):
+        """Wipe every candidate for the selected job, keeping the job (JD, weights,
+        thresholds) intact so a fresh batch can be uploaded. Gated behind a confirm dialog."""
+        if not self.selected_job_id:
+            return
+        self.is_deleting_all = True
+        yield
+        try:
+            result = await api_client.delete_all_candidates(self.api_key, self.selected_job_id)
+            n = result.get("deleted_count", 0)
+            self.results = []
+            self.offset = 0
+            self.has_more = False
+            self.batch_stats = {}
+            if n:
+                yield rx.toast.success(f"Deleted {n} candidate{'s' if n != 1 else ''}.")
+            else:
+                yield rx.toast.info("No candidates to delete.")
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Delete failed: {e}")
+        finally:
+            self.is_deleting_all = False
 
     async def attach_resume(self, files: list[rx.UploadFile]):
         if not self.selected_job_id or not self.resume_target_id or not files:

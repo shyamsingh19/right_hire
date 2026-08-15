@@ -23,21 +23,33 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import logging
 import os
 import re
+import sys
 import time
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 from email_validator import validate_email, EmailNotValidError
 
+# Running ``python scripts/collect_candidates.py`` puts only ``scripts/`` on
+# sys.path. Add the repository root so verification can reuse worker helpers.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from app.pipeline.ingest import fetch_drive_file  # noqa: E402
+from app.pipeline.parse import extract_text  # noqa: E402
+
 # ── Load .env from repo root ──────────────────────────────────
-_env_path = Path(__file__).resolve().parent.parent / ".env"
+_env_path = REPO_ROOT / ".env"
 if _env_path.exists():
     for _line in _env_path.read_text().splitlines():
         _line = _line.strip()
@@ -49,10 +61,12 @@ if _env_path.exists():
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 
-OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
+OUTPUT_DIR = REPO_ROOT / "output"
 OUTPUT_CSV = OUTPUT_DIR / "candidates.csv"
 OUTPUT_HTML = OUTPUT_DIR / "candidates.html"
 OUTPUT_XLSX = OUTPUT_DIR / "candidates.xlsx"
+RESUME_DIR = OUTPUT_DIR / "resumes"
+DOWNLOAD_REPORT = OUTPUT_DIR / "resume_downloads.csv"
 
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -60,8 +74,21 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 FIELDS = ["name", "email", "resume_url", "yoe", "location", "source", "collected_at"]
 # ATS Excel columns (subset, required by ingest API)
 ATS_FIELDS = ["name", "email", "resume_url", "yoe", "location"]
+DOWNLOAD_FIELDS = [
+    "name",
+    "email",
+    "resume_url",
+    "status",
+    "local_path",
+    "size_bytes",
+    "text_characters",
+    "checked_at",
+    "detail",
+]
+MIN_RESUME_TEXT_CHARS = 1000
 
 EMAIL_RE = re.compile(r"[\w.+\-]+@[\w\-]+\.[a-z]{2,}")
+_DRIVE_FILE_PATH_RE = re.compile(r"^/file/d/([^/]+)")
 
 # ── Logging ───────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
@@ -201,13 +228,16 @@ def enrich_email(c: Candidate) -> str | None:
         return None
 
     try:
+        # A Drive share URL serves an HTML viewer.  Fetch the file endpoint instead
+        # so PDFs can be searched for the candidate's contact details.
+        download_url = google_drive_download_url(c.resume_url)
         resp = requests.get(
-            c.resume_url, timeout=10, stream=True, headers={"User-Agent": "Mozilla/5.0"}
+            download_url, timeout=10, stream=True, headers={"User-Agent": "Mozilla/5.0"}
         )
         resp.raise_for_status()
         content_type = resp.headers.get("Content-Type", "")
 
-        if "pdf" in content_type or c.resume_url.lower().endswith(".pdf"):
+        if "pdf" in content_type or download_url.lower().endswith(".pdf"):
             raw = resp.content
             # Try pdfplumber first, fall back to pymupdf
             try:
@@ -298,6 +328,133 @@ def export_xlsx(candidates: list[Candidate]) -> None:
     log.info("✅  Excel → %s  (%d rows)", OUTPUT_XLSX, len(candidates))
 
 
+# ── Resume download verification ──────────────────────────────
+def _safe_filename(value: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-")
+    return value[:60] or "resume"
+
+
+def _resume_suffix(path: Path) -> str:
+    """Infer an extension from the downloaded content, not the share URL."""
+    try:
+        head = path.read_bytes()[:512].lstrip().lower()
+    except OSError:
+        return ".bin"
+    if head.startswith(b"%pdf-"):
+        return ".pdf"
+    if head.startswith((b"<!doctype html", b"<html")):
+        return ".html"
+    if head.startswith(b"pk\\x03\\x04"):
+        return ".zip"
+    return ".bin"
+
+
+def _load_collected_candidates() -> list[Candidate]:
+    """Load the existing candidate export for verification without searching again."""
+    if not OUTPUT_CSV.exists():
+        raise FileNotFoundError(f"No candidate export found at {OUTPUT_CSV}")
+    with open(OUTPUT_CSV, encoding="utf-8", newline="") as f:
+        return [
+            Candidate(
+                name=row.get("name", ""),
+                email=row.get("email") or None,
+                resume_url=row.get("resume_url") or None,
+                yoe=int(row["yoe"]) if row.get("yoe", "").isdigit() else None,
+                location=row.get("location") or None,
+                source=row.get("source", ""),
+                collected_at=row.get("collected_at", ""),
+            )
+            for row in csv.DictReader(f)
+            if row.get("name") and row.get("resume_url")
+        ]
+
+
+def verify_resume_downloads(candidates: list[Candidate]) -> None:
+    """Download resumes, save the response, and write a reproducible status report.
+
+    This deliberately uses the same ``fetch_drive_file`` and ``extract_text`` helpers
+    as the worker. A successful result therefore means the resume is publicly
+    downloadable *and* has enough text for the screening pipeline.
+    """
+    RESUME_DIR.mkdir(parents=True, exist_ok=True)
+    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    usable = downloaded = 0
+
+    log.info("Resume verification › checking %d links", len(candidates))
+    log.info("Downloaded files → %s", RESUME_DIR)
+    with open(DOWNLOAD_REPORT, "w", newline="", encoding="utf-8") as report_file:
+        report = csv.DictWriter(report_file, fieldnames=DOWNLOAD_FIELDS)
+        report.writeheader()
+
+        for index, candidate in enumerate(candidates, 1):
+            assert candidate.resume_url  # candidates are filtered by the caller
+            url_hash = hashlib.sha256(candidate.resume_url.encode()).hexdigest()[:12]
+            base_name = f"{index:03d}-{_safe_filename(candidate.name)}-{url_hash}"
+            temporary_path = RESUME_DIR / f"{base_name}.download"
+            row = {
+                "name": candidate.name,
+                "email": candidate.email or "",
+                "resume_url": candidate.resume_url,
+                "status": "failed",
+                "local_path": "",
+                "size_bytes": "",
+                "text_characters": "",
+                "checked_at": checked_at,
+                "detail": "",
+            }
+
+            try:
+                fetch_drive_file(candidate.resume_url, str(temporary_path))
+                downloaded += 1
+                saved_path = temporary_path.with_suffix(_resume_suffix(temporary_path))
+                temporary_path.replace(saved_path)
+                row.update(
+                    local_path=str(saved_path),
+                    size_bytes=saved_path.stat().st_size,
+                )
+                if saved_path.suffix == ".html":
+                    row.update(status="not_a_resume", detail="Received HTML, not a resume file")
+                    log.info("  – %s  → HTML page (saved for inspection)", candidate.name)
+                    report.writerow(row)
+                    report_file.flush()
+                    continue
+
+                text_characters = len(extract_text(str(saved_path)).strip())
+                row["text_characters"] = text_characters
+                if text_characters < MIN_RESUME_TEXT_CHARS:
+                    row.update(
+                        status="insufficient_text",
+                        detail=f"Extracted fewer than {MIN_RESUME_TEXT_CHARS} characters",
+                    )
+                    log.info("  – %s  → %d chars (below minimum)", candidate.name, text_characters)
+                else:
+                    row.update(status="usable")
+                    usable += 1
+                    log.info(
+                        "  ✓ %s  → %s (%d bytes, %d chars)",
+                        candidate.name,
+                        saved_path.name,
+                        saved_path.stat().st_size,
+                        text_characters,
+                    )
+            except Exception as exc:
+                temporary_path.unlink(missing_ok=True)
+                row["detail"] = str(exc)
+                log.warning("  ✗ %s  → %s", candidate.name, exc)
+
+            report.writerow(row)
+            report_file.flush()
+
+    log.info("Resume verification done: %d/%d downloaded", downloaded, len(candidates))
+    log.info(
+        "Usable by worker: %d/%d (at least %d extracted characters)",
+        usable,
+        len(candidates),
+        MIN_RESUME_TEXT_CHARS,
+    )
+    log.info("Download report → %s", DOWNLOAD_REPORT)
+
+
 # ── HTTP helpers ──────────────────────────────────────────────
 session = requests.Session()
 session.headers["User-Agent"] = "CandidateCollector/1.0 (research-only)"
@@ -334,6 +491,36 @@ def clean_email(raw: str) -> str | None:
         return validate_email(raw, check_deliverability=False).normalized
     except EmailNotValidError:
         return None
+
+
+def _google_drive_file_id(url: str) -> str | None:
+    """Return a Google Drive file ID from a share/download URL, if present."""
+    parsed = urlparse(url)
+    if parsed.hostname not in {"drive.google.com", "www.drive.google.com"}:
+        return None
+
+    match = _DRIVE_FILE_PATH_RE.match(parsed.path)
+    if match:
+        return match.group(1)
+
+    # Handles /open?id=<id> and /uc?export=download&id=<id> links.
+    return parse_qs(parsed.query).get("id", [None])[0]
+
+
+def canonical_google_drive_url(url: str) -> str | None:
+    """Convert a Drive result into the stable share URL stored in exports."""
+    file_id = _google_drive_file_id(url)
+    if not file_id:
+        return None
+    return f"https://drive.google.com/file/d/{quote(file_id, safe='')}/view"
+
+
+def google_drive_download_url(url: str) -> str:
+    """Return Drive's download endpoint, or leave a non-Drive URL unchanged."""
+    file_id = _google_drive_file_id(url)
+    if not file_id:
+        return url
+    return f"https://drive.google.com/uc?export=download&id={quote(file_id, safe='')}"
 
 
 def dedup(candidates: list[Candidate]) -> list[Candidate]:
@@ -468,6 +655,9 @@ def _parse_name(title: str) -> str | None:
 
 # ── Source 2: Serper.dev (Google Search API) ─────────────────
 _SERPER_QUERIES = [
+    # Put this first: the collector's exported resume_url is suitable for the
+    # ingest worker when Serper finds a public Drive-hosted resume.
+    'intitle:"{query}" resume pdf site:drive.google.com',
     '"{query}" resume site:github.io',
     '"{query}" resume filetype:pdf',
     'intitle:"resume" "{query}" site:linkedin.com/in',
@@ -476,7 +666,6 @@ _SERPER_QUERIES = [
     '"{query}" resume site:*.github.io -template -sample',
     'filetype:pdf "{query}" resume engineer',
     '"{query}" developer resume contact email',
-    'intitle:"{query}" resume pdf site:drive.google.com',
     '"{query}" developer site:about.me OR site:career.io',
 ]
 
@@ -524,6 +713,14 @@ def from_serper(query: str, limit: int, sheet: LocalSheet) -> list[Candidate]:
                 link = item.get("link", "")
                 snippet = item.get("snippet", "")
 
+                # Preserve a public Google Drive *share* link in the export,
+                # rather than Serper's variant (for example /open?id=...).
+                # The app accepts this URL directly and converts it to a download
+                # URL when it evaluates the candidate.
+                drive_link = canonical_google_drive_url(link)
+                if drive_link:
+                    link = drive_link
+
                 if not link or link in seen_links:
                     continue
                 if _is_junk(link, title):
@@ -566,7 +763,24 @@ def main():
     ap.add_argument("--source", default="all", choices=["all", "github", "google"])
     ap.add_argument("--no-enrich", action="store_true", help="Skip email enrichment step")
     ap.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+    ap.add_argument(
+        "--verify-output",
+        action="store_true",
+        help="Download and validate resume URLs already in output/candidates.csv, then exit",
+    )
+    ap.add_argument(
+        "--verify-resumes",
+        action="store_true",
+        help="After collecting, download and validate every collected resume URL",
+    )
     args = ap.parse_args()
+
+    if args.verify_output:
+        try:
+            verify_resume_downloads(_load_collected_candidates())
+        except FileNotFoundError as exc:
+            ap.error(str(exc))
+        return
 
     sheet = LocalSheet()
 
@@ -601,6 +815,8 @@ def main():
     log.info("HTML → %s", OUTPUT_HTML)
 
     export_xlsx(final)
+    if args.verify_resumes:
+        verify_resume_downloads(final)
     log.info("Open candidates.xlsx and upload via POST /jobs/<id>/candidates")
 
 

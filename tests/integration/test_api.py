@@ -362,6 +362,38 @@ def test_delete_candidate_not_found(client):
     assert resp.status_code == 404
 
 
+def test_delete_all_candidates(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+
+    csv_bytes = b"name,email\nAlice,alice@test.com\nBob,bob@test.com\n"
+    client.post(f"/jobs/{job_id}/candidates", files={"file": ("c.csv", csv_bytes, "text/csv")})
+
+    resp = client.delete(f"/jobs/{job_id}/candidates")
+    assert resp.status_code == 200
+    assert resp.json()["deleted_count"] == 2
+
+    results = client.get(f"/jobs/{job_id}/results").json()
+    assert results == []
+
+    # Job itself must survive so a fresh batch can be uploaded to it.
+    assert client.get(f"/jobs/{job_id}").status_code == 200
+
+
+def test_delete_all_candidates_empty(client):
+    create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
+    job_id = create.json()["id"]
+
+    resp = client.delete(f"/jobs/{job_id}/candidates")
+    assert resp.status_code == 200
+    assert resp.json()["deleted_count"] == 0
+
+
+def test_delete_all_candidates_job_not_found(client):
+    resp = client.delete("/jobs/nonexistent-id/candidates")
+    assert resp.status_code == 404
+
+
 def test_upload_candidate_resume_file(client):
     create = client.post("/jobs", json={"title": "Eng", "jd_raw": "Python required."})
     job_id = create.json()["id"]

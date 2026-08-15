@@ -21,6 +21,7 @@ class CreateJobState(AppState):
     min_yoe: float = 0.0
     location: str = ""
     must_haves: list[str] = []  # noqa: RUF012
+    new_must_have_input: str = ""
 
     skill_weight: float = 0.30
     cosine_weight: float = 0.20
@@ -61,6 +62,18 @@ class CreateJobState(AppState):
 
     def remove_preferred_skill(self, skill: str) -> None:
         self.preferred_skills = [s for s in self.preferred_skills if s != skill]
+
+    def set_new_must_have_input(self, value: str) -> None:
+        self.new_must_have_input = value
+
+    def add_must_have(self) -> None:
+        must_have = self.new_must_have_input.strip()
+        if must_have and must_have not in self.must_haves:
+            self.must_haves = self.must_haves + [must_have]
+        self.new_must_have_input = ""
+
+    def remove_must_have(self, must_have: str) -> None:
+        self.must_haves = [m for m in self.must_haves if m != must_have]
 
     def set_skill_weight(self, value: list[float]) -> None:
         self.skill_weight = value[0]

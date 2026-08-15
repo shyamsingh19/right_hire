@@ -31,6 +31,7 @@ from app.schemas import (
     CandidateResponse,
     CandidateUpdate,
     ColumnPreviewResponse,
+    DeleteAllCandidatesResponse,
 )
 
 router = APIRouter(prefix="/jobs", tags=["ingest"])
@@ -412,6 +413,43 @@ async def upload_candidate_resume(
     return BulkIngestResponse(
         job_id=job_id, queued_count=1, candidate_ids=queued_ids, failed_count=0
     )
+
+
+@router.delete("/{job_id}/candidates", response_model=DeleteAllCandidatesResponse)
+async def delete_all_candidates(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete every candidate (and their evaluations/resume files) for this job, leaving the
+    job itself — its JD, weights, and thresholds — intact so a fresh batch can be uploaded.
+    Credits already deducted on ingest are not refunded, same as cancel-pending."""
+    await _get_owned_job(db, job_id, user)
+
+    result = await db.execute(select(Candidate).where(Candidate.job_id == job_id))
+    candidates = result.scalars().all()
+
+    if not candidates:
+        return DeleteAllCandidatesResponse(deleted_count=0)
+
+    storage_root = Path(settings.storage_dir).resolve()
+    for candidate in candidates:
+        if candidate.resume_url:
+            resume_path = Path(candidate.resume_url)
+            try:
+                if resume_path.exists() and resume_path.resolve().is_relative_to(storage_root):
+                    resume_path.unlink()
+            except OSError:
+                logger.warning(
+                    "Could not delete stored resume file for candidate %s", candidate.id
+                )
+
+    await db.execute(delete(Evaluation).where(Evaluation.job_id == job_id))
+    await db.execute(delete(Candidate).where(Candidate.job_id == job_id))
+    await db.commit()
+
+    logger.info("User %s deleted all %d candidates for job %s", user.id, len(candidates), job_id)
+    return DeleteAllCandidatesResponse(deleted_count=len(candidates))
 
 
 @router.delete("/{job_id}/candidates/{candidate_id}", status_code=204)

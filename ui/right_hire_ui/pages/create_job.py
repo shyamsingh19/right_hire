@@ -166,6 +166,25 @@ def _preferred_skill_tag(skill: str) -> rx.Component:
     )
 
 
+def _must_have_tag(must_have: str) -> rx.Component:
+    return rx.badge(
+        rx.hstack(
+            rx.text(must_have),
+            rx.icon(
+                "x",
+                size=12,
+                cursor="pointer",
+                on_click=CreateJobState.remove_must_have(must_have),
+            ),
+            spacing="1",
+            align="center",
+        ),
+        variant="outline",
+        color_scheme="gray",
+        size="2",
+    )
+
+
 def _skills_editor() -> rx.Component:
     return rx.vstack(
         rx.text("Required skills", weight="medium", size="2"),
@@ -294,19 +313,33 @@ def _step_2() -> rx.Component:
             spacing="4",
         ),
         _skills_editor(),
-        rx.cond(
-            CreateJobState.must_haves.length() > 0,
-            rx.vstack(
-                rx.text("Must-haves", weight="medium", size="2"),
-                rx.flex(
-                    rx.foreach(CreateJobState.must_haves, lambda m: _skill_tag(m, removable=False)),
-                    wrap="wrap",
-                    gap="2",
-                ),
-                spacing="2",
-                width="100%",
-                align="start",
+        rx.vstack(
+            rx.text("Must-haves", weight="medium", size="2"),
+            rx.flex(
+                rx.foreach(CreateJobState.must_haves, _must_have_tag),
+                wrap="wrap",
+                gap="2",
             ),
+            rx.hstack(
+                rx.input(
+                    placeholder="Add a must-have...",
+                    value=CreateJobState.new_must_have_input,
+                    on_change=CreateJobState.set_new_must_have_input,
+                    on_key_down=lambda k: rx.cond(
+                        k == "Enter", CreateJobState.add_must_have(), rx.console_log("")
+                    ),
+                    size="2",
+                    width="100%",
+                ),
+                rx.button(
+                    "Add", on_click=CreateJobState.add_must_have, size="2", variant="soft"
+                ),
+                width="100%",
+                spacing="2",
+            ),
+            spacing="2",
+            width="100%",
+            align="start",
         ),
         rx.divider(),
         _weights_editor(),

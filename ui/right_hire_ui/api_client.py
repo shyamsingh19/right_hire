@@ -257,6 +257,17 @@ async def delete_candidate(api_key: str, job_id: str, candidate_id: str) -> None
         await _raise_for_status(resp)
 
 
+async def delete_all_candidates(api_key: str, job_id: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(
+            f"{API_BASE}/jobs/{job_id}/candidates",
+            headers=_headers(api_key),
+            timeout=30,
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
 async def export_results_csv(api_key: str, job_id: str, verdict_filter: str) -> str:
     """Returns the CSV body as text. Fetched here rather than linked directly because the
     export route needs the X-API-Key header, which a plain browser <a href> can't send."""

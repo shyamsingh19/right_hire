@@ -218,6 +218,10 @@ class CancelPendingResponse(BaseModel):
     cancelled_count: int
 
 
+class DeleteAllCandidatesResponse(BaseModel):
+    deleted_count: int
+
+
 class JobProgress(BaseModel):
     """Lightweight per-status counts for GET /jobs/{id}/progress — cheaper than fetching
     full results just to render a progress bar, and safe to poll frequently."""

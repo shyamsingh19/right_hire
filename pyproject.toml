@@ -19,6 +19,8 @@ dependencies = [
     "rq",
     "redis",
     "httpx",
+    "requests",
+    "email-validator",
     "pymupdf",
     "pdfplumber",
     "pytesseract",
