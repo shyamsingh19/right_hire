@@ -166,6 +166,19 @@ def _build_reasoning_card(
         summary = f"{lead} — {skills_str}"
     elif verdict == "Maybe":
         summary = f"Borderline candidate — {skills_str}. Review manually before deciding"
+    elif "filter" in criterion_reasons:
+        # Hard-filter reject (missing must-have skill, insufficient YOE, location mismatch) —
+        # never reached the judge, so this is the only specific reason available.
+        summary = criterion_reasons["filter"]
+    elif criterion_scores := {k: v for k, v in rubric.items() if isinstance(v, (int, float))}:
+        # Lead with the weakest-scoring criterion's own explanation rather than a generic line.
+        weakest = min(criterion_scores, key=criterion_scores.get)
+        weakest_reason = criterion_reasons.get(weakest)
+        summary = (
+            f"Weak on {weakest.replace('_', ' ')} ({criterion_scores[weakest]:.2f}) — {weakest_reason}"
+            if weakest_reason
+            else f"Does not meet the minimum requirements for this role (weak {weakest.replace('_', ' ')})"
+        )
     else:
         summary = "Does not meet the minimum requirements for this role"
     summary = f"{summary}{f' ({rank_str})' if rank_str else ''}."
