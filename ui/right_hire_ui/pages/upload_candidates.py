@@ -64,7 +64,8 @@ def _mapping_row(field: str) -> rx.Component:
         ),
         spacing="1",
         width="100%",
-        padding_y="2",
+        padding_y="3",
+        padding_x="1",
     )
 
 
@@ -88,7 +89,7 @@ def _mapping_panel() -> rx.Component:
                 _mapping_row,
             ),
             width="100%",
-            spacing="1",
+            spacing="3",
         ),
         rx.cond(
             UploadState.mapping_error != "",
@@ -131,8 +132,8 @@ def _mapping_panel() -> rx.Component:
             width="100%",
         ),
         width="100%",
-        spacing="3",
-        padding="4",
+        spacing="4",
+        padding="5",
         border=f"1px solid {rx.color('violet', 5)}",
         border_radius="var(--radius-4)",
         background=rx.color("violet", 1),
