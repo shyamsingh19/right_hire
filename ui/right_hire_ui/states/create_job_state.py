@@ -34,6 +34,7 @@ class CreateJobState(AppState):
     is_submitting: bool = False
     error_message: str = ""
     created_job_id: str = ""
+    created_job_title: str = ""
     created_job_jd_parsed: dict = {}  # noqa: RUF012
 
     def set_title(self, value: str) -> None:
@@ -167,12 +168,14 @@ class CreateJobState(AppState):
 
         self.is_submitting = True
         self.created_job_id = ""
+        self.created_job_title = ""
         self.created_job_jd_parsed = {}
         yield
 
         try:
+            job_title = self.parsed_title or self.title
             jd_parsed_override = {
-                "title": self.parsed_title or self.title,
+                "title": job_title,
                 "required_skills": self.required_skills,
                 "preferred_skills": self.preferred_skills,
                 "min_yoe": self.min_yoe,
@@ -193,11 +196,12 @@ class CreateJobState(AppState):
                 jd_parsed_override=jd_parsed_override,
             )
             self.created_job_id = job["id"]
+            self.created_job_title = job_title
             self.created_job_jd_parsed = job.get("jd_parsed") or {}
             self.step = 1
             self.title = ""
             self.jd_raw = ""
-            yield rx.toast.success(f"Job created! ID: {job['id']}")
+            yield rx.toast.success(f"'{job_title}' is live and ready for candidates.")
         except (httpx.HTTPError, api_client.ApiError) as e:
             self.error_message = str(e)
             yield rx.toast.error(self.error_message)

@@ -28,7 +28,7 @@ def _mapping_row(field: str) -> rx.Component:
                     spacing="2",
                     align="center",
                 ),
-                rx.text(field, size="1", color=rx.color("gray", 10)),
+                rx.text(f"Right Hire field key: {field}", size="1", color=rx.color("gray", 10)),
                 spacing="0",
                 min_width="160px",
             ),
@@ -83,6 +83,28 @@ def _mapping_panel() -> rx.Component:
             color=rx.color("gray", 11),
         ),
         rx.divider(),
+        rx.hstack(
+            rx.text(
+                "SYSTEM FIELD",
+                size="1",
+                weight="bold",
+                color=rx.color("gray", 10),
+                letter_spacing="0.03em",
+                min_width="160px",
+            ),
+            rx.box(width="14px"),
+            rx.text(
+                "MATCHED COLUMN FROM YOUR FILE",
+                size="1",
+                weight="bold",
+                color=rx.color("violet", 10),
+                letter_spacing="0.03em",
+                width="240px",
+            ),
+            spacing="4",
+            align="center",
+            width="100%",
+        ),
         rx.vstack(
             rx.foreach(
                 CANONICAL_FIELDS,

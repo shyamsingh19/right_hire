@@ -166,7 +166,9 @@ def _preferred_skill_tag(skill: str) -> rx.Component:
     )
 
 
-def _must_have_tag(must_have: str) -> rx.Component:
+def _must_have_tag(must_have: str, removable: bool = True) -> rx.Component:
+    if not removable:
+        return rx.badge(must_have, variant="outline", color_scheme="gray", size="2")
     return rx.badge(
         rx.hstack(
             rx.text(must_have),
@@ -316,7 +318,7 @@ def _step_2() -> rx.Component:
         rx.vstack(
             rx.text("Must-haves", weight="medium", size="2"),
             rx.flex(
-                rx.foreach(CreateJobState.must_haves, _must_have_tag),
+                rx.foreach(CreateJobState.must_haves, lambda m: _must_have_tag(m)),
                 wrap="wrap",
                 gap="2",
             ),
@@ -387,19 +389,93 @@ def _step_2() -> rx.Component:
     )
 
 
+def _summary_item(label: str, value) -> rx.Component:
+    return rx.vstack(
+        rx.text(label, size="1", color=rx.color("gray", 10), weight="medium"),
+        rx.text(value, size="3", weight="medium"),
+        spacing="1",
+        align="start",
+    )
+
+
 def _created_job_panel() -> rx.Component:
     return rx.cond(
         CreateJobState.created_job_id != "",
         rx.vstack(
             rx.callout(
-                f"Job created! ID: {CreateJobState.created_job_id}",
+                f"“{CreateJobState.created_job_title}” is live and ready for candidates.",
                 icon="check",
                 color_scheme="green",
             ),
-            rx.text("Stored job criteria", weight="medium", size="2"),
-            rx.code_block(
-                CreateJobState.created_job_jd_parsed.to_string(),
-                language="json",
+            rx.box(
+                rx.grid(
+                    _summary_item(
+                        "Minimum experience", f"{CreateJobState.min_yoe:.1f} yrs"
+                    ),
+                    _summary_item(
+                        "Location",
+                        rx.cond(CreateJobState.location != "", CreateJobState.location, "Any"),
+                    ),
+                    _summary_item(
+                        "Fit threshold", f"{CreateJobState.fit_threshold:.2f}"
+                    ),
+                    _summary_item(
+                        "Maybe threshold", f"{CreateJobState.maybe_threshold:.2f}"
+                    ),
+                    columns="2",
+                    spacing="4",
+                    width="100%",
+                ),
+                rx.cond(
+                    CreateJobState.required_skills.length() > 0,
+                    rx.vstack(
+                        rx.text(
+                            "Required skills",
+                            size="1",
+                            color=rx.color("gray", 10),
+                            weight="medium",
+                        ),
+                        rx.flex(
+                            rx.foreach(
+                                CreateJobState.required_skills,
+                                lambda s: _skill_tag(s, removable=False),
+                            ),
+                            wrap="wrap",
+                            gap="2",
+                        ),
+                        spacing="2",
+                        align="start",
+                        width="100%",
+                        margin_top="3",
+                    ),
+                ),
+                rx.cond(
+                    CreateJobState.must_haves.length() > 0,
+                    rx.vstack(
+                        rx.text(
+                            "Must-haves",
+                            size="1",
+                            color=rx.color("gray", 10),
+                            weight="medium",
+                        ),
+                        rx.flex(
+                            rx.foreach(
+                                CreateJobState.must_haves,
+                                lambda m: _must_have_tag(m, removable=False),
+                            ),
+                            wrap="wrap",
+                            gap="2",
+                        ),
+                        spacing="2",
+                        align="start",
+                        width="100%",
+                        margin_top="3",
+                    ),
+                ),
+                padding="4",
+                border=f"1px solid {rx.color('gray', 5)}",
+                border_radius="var(--radius-3)",
+                width="100%",
             ),
             width="100%",
             spacing="3",
