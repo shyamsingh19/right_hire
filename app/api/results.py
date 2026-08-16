@@ -273,7 +273,9 @@ async def list_results(
             await db.execute(
                 select(Evaluation)
                 .where(Evaluation.candidate_id == c.id)
-                .order_by(Evaluation.id.desc())
+                # id is a random UUID, not chronological — sorting by it can hand back a
+                # stale (e.g. pre-retry failed) row instead of the true latest evaluation.
+                .order_by(Evaluation.created_at.desc(), Evaluation.id.desc())
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -319,7 +321,9 @@ async def export_results_csv(
             await db.execute(
                 select(Evaluation)
                 .where(Evaluation.candidate_id == c.id)
-                .order_by(Evaluation.id.desc())
+                # id is a random UUID, not chronological — sorting by it can hand back a
+                # stale (e.g. pre-retry failed) row instead of the true latest evaluation.
+                .order_by(Evaluation.created_at.desc(), Evaluation.id.desc())
                 .limit(1)
             )
         ).scalar_one_or_none()
