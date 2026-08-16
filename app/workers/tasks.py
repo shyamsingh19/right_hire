@@ -238,7 +238,7 @@ def process_candidate(candidate_id: str, job_id: str) -> None:
                 "matched_skills": match_result.get("matched_skills", []),
             },
             "score_breakdown": breakdown,
-            "model_used": settings.judge_model,
+            "model_used": getattr(provider, "model", settings.judge_model),
         }
         _write_evaluation(session, candidate, job, result, ck)
         _cache_verdict(ck, result)
