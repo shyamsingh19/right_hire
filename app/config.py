@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     embed_model: str = "all-MiniLM-L6-v2"
     groq_api_key: str = ""
     cascade_model: str = "llama-3.3-70b-versatile"
+    # Retry/backoff for transient Groq failures (timeouts, 429s). Exponential:
+    # groq_retry_backoff_base ** attempt seconds between tries.
+    groq_max_retries: int = 3
+    groq_retry_backoff_base: float = 2.0
+    # Client-side throttle so we never trip Groq's rate limit in the first place.
+    # Free tier is ~30 req/min for llama-3.3-70b-versatile — kept under that by default.
+    # Raise this in .env once you're on a paid Groq plan.
+    groq_requests_per_minute: int = 28
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_embed_model: str = "text-embedding-3-small"

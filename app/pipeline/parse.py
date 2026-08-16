@@ -106,7 +106,7 @@ def parse_resume(text: str, provider: LLMProvider) -> ParsedResume:
             exc,
             exc_info=True,
         )
-        raise LLMUnavailableError("LLM provider unavailable for resume parsing") from exc
+        raise LLMUnavailableError(f"LLM provider unavailable for resume parsing: {exc}") from exc
 
 
 def parse_jd(jd_raw: str, provider: LLMProvider) -> ParsedJD:
@@ -123,4 +123,4 @@ def parse_jd(jd_raw: str, provider: LLMProvider) -> ParsedJD:
             exc,
             exc_info=True,
         )
-        raise LLMUnavailableError("LLM provider unavailable for JD parsing") from exc
+        raise LLMUnavailableError(f"LLM provider unavailable for JD parsing: {exc}") from exc

@@ -68,12 +68,14 @@ def _friendly_error(raw: str | None) -> str:
         or "embed failed" in lowered
         or "llm provider unavailable" in lowered
     ):
-        # Infrastructure, not the candidate — say so, but don't leak backend/provider
-        # jargon to a recruiter. The technical detail (backend, model, real exception)
-        # is in the worker logs — see app/pipeline/parse.py's logger.warning calls.
+        # Infrastructure, not the candidate — lead with that so it never reads as a
+        # judgement on the person. But the real cause (backend, model, exception type) is
+        # appended rather than discarded, so whoever's debugging doesn't have to go dig it
+        # out of worker.log — it's already on the screen in front of them.
         return (
             "The AI model couldn't complete this evaluation — this is a system issue, not "
-            "a reflection of the candidate. Re-queue them to retry."
+            "a reflection of the candidate. Re-queue them to retry. "
+            f"(Details: {text[:300]})"
         )
     return f"Processing failed: {text}"
 

@@ -106,6 +106,8 @@ app/
 |---|---|---|
 | `LLM_BACKEND` | `local` | `local` \| `groq` \| `openai` |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama host |
+| `GROQ_REQUESTS_PER_MINUTE` | `28` | Client-side throttle on Groq calls — raise once on a paid tier |
+| `GROQ_MAX_RETRIES` | `3` | Retries on transient Groq failure (429/timeout), exp. backoff |
 | `JUDGE_MODEL` | `qwen2.5:7b` | Local evaluation model |
 | `EMBED_MODEL` | `all-MiniLM-L6-v2` | SentenceTransformer embedding model |
 | `DATABASE_URL` | `mysql+pymysql://ats:ats@localhost:3306/ats` | Sync DB string (derived to async automatically) |

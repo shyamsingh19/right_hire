@@ -477,6 +477,18 @@ def _row_actions(row: dict) -> rx.Component:
         rx.cond(
             is_error,
             rx.button(
+                rx.icon("refresh-cw", size=12),
+                "Retry",
+                size="1",
+                variant="soft",
+                color_scheme="orange",
+                on_click=ResultsState.retry_candidate(candidate_id),
+                loading=ResultsState.retrying_candidate_id == candidate_id,
+            ),
+        ),
+        rx.cond(
+            is_error,
+            rx.button(
                 rx.icon("file-up", size=12),
                 "Attach Resume PDF",
                 size="1",
@@ -618,6 +630,18 @@ def _processing_status_banner() -> rx.Component:
                 spacing="1",
             ),
             rx.spacer(),
+            rx.cond(
+                ResultsState.needs_attention_count > 0,
+                rx.button(
+                    rx.icon("refresh-cw", size=14),
+                    "Retry all failed",
+                    on_click=ResultsState.retry_all_failed,
+                    loading=ResultsState.is_retrying_all,
+                    size="2",
+                    variant="soft",
+                    color_scheme="orange",
+                ),
+            ),
             rx.cond(
                 ResultsState.pending_count > 0,
                 rx.button(

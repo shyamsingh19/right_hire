@@ -143,6 +143,8 @@ class ResultsState(AppState):
     is_deleting_all: bool = False
     is_deleting_job: bool = False
     deleting_candidate_id: str = ""
+    retrying_candidate_id: str = ""
+    is_retrying_all: bool = False
 
     batch_stats: dict = {}  # noqa: RUF012 — BatchStats.model_dump()
     is_loading_stats: bool = False
@@ -301,6 +303,51 @@ class ResultsState(AppState):
             yield rx.toast.error(f"Cancel failed: {e}")
         finally:
             self.is_cancelling = False
+
+    async def retry_candidate(self, candidate_id: str):
+        """Re-queue a single failed candidate using its existing resume — no re-upload,
+        no extra credit charge. For candidates with no resume on file, the backend rejects
+        this and the UI falls back to prompting for an attachment instead."""
+        if not self.selected_job_id:
+            return
+        self.retrying_candidate_id = candidate_id
+        yield
+        try:
+            await api_client.retry_candidate(self.api_key, self.selected_job_id, candidate_id)
+            yield rx.toast.info("Candidate re-queued for evaluation.")
+            yield ResultsState.load_results
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(str(e))
+        finally:
+            self.retrying_candidate_id = ""
+
+    async def retry_all_failed(self):
+        """Re-queue every failed candidate in this job that still has a resume on file."""
+        if not self.selected_job_id:
+            return
+        self.is_retrying_all = True
+        yield
+        try:
+            result = await api_client.retry_failed_candidates(self.api_key, self.selected_job_id)
+            retried = result.get("retried_count", 0)
+            skipped = result.get("skipped_count", 0)
+            if retried:
+                msg = f"Re-queued {retried} candidate{'s' if retried != 1 else ''} for retry."
+                if skipped:
+                    msg += f" {skipped} skipped — no resume on file."
+                yield rx.toast.success(msg)
+                yield ResultsState.load_results
+            elif skipped:
+                yield rx.toast.info(
+                    f"Nothing to retry — {skipped} failed candidate{'s' if skipped != 1 else ''} "
+                    "have no resume on file. Attach a resume to retry them."
+                )
+            else:
+                yield rx.toast.info("No failed candidates to retry.")
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Retry failed: {e}")
+        finally:
+            self.is_retrying_all = False
 
     async def export_csv(self):
         if not self.selected_job_id:

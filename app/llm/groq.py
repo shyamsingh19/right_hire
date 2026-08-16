@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
+from collections import deque
 
 from pydantic import BaseModel
 
@@ -13,6 +16,55 @@ logger = logging.getLogger(__name__)
 # Groq's OpenAI-compatible base URL
 _GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 _HEALTH_TIMEOUT = 5.0
+
+
+class _RateLimiter:
+    """Sliding-window throttle so we stay under Groq's requests-per-minute cap instead of
+    finding out via 429s. Shared across all calls in this process (one RQ worker == one
+    process handling candidates one at a time, so a process-local window is sufficient)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._calls: deque[float] = deque()
+
+    def wait(self) -> None:
+        limit = max(settings.groq_requests_per_minute, 1)
+        with self._lock:
+            now = time.monotonic()
+            while self._calls and now - self._calls[0] > 60.0:
+                self._calls.popleft()
+            if len(self._calls) >= limit:
+                sleep_for = 60.0 - (now - self._calls[0])
+                if sleep_for > 0:
+                    logger.info(
+                        "GroqProvider throttling — at %d/%d requests this minute, waiting %.1fs",
+                        len(self._calls),
+                        limit,
+                        sleep_for,
+                    )
+                    time.sleep(sleep_for)
+                now = time.monotonic()
+                while self._calls and now - self._calls[0] > 60.0:
+                    self._calls.popleft()
+            self._calls.append(time.monotonic())
+
+
+_rate_limiter = _RateLimiter()
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Best-effort extraction of a Retry-After header from an openai/httpx error."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    value = headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class GroqProvider(LLMProvider):
@@ -41,7 +93,39 @@ class GroqProvider(LLMProvider):
         schema: type[BaseModel],
         max_tokens: int = 256,
     ) -> BaseModel:
-        """Call Groq via instructor with structured output."""
+        """Call Groq via instructor with structured output, throttled to stay under the
+        configured requests-per-minute cap and retried with backoff on transient failure."""
+        max_retries = max(settings.groq_max_retries, 1)
+        last_exc: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            _rate_limiter.wait()
+            try:
+                return self._complete_json_once(prompt, schema, max_tokens)
+            except LLMUnavailableError as exc:
+                last_exc = exc
+                logger.warning(
+                    "GroqProvider.complete_json attempt %d/%d failed [model=%s]: %s",
+                    attempt,
+                    max_retries,
+                    self.model,
+                    exc,
+                )
+                if attempt < max_retries:
+                    retry_after = _retry_after_seconds(exc.__cause__) if exc.__cause__ else None
+                    delay = retry_after or settings.groq_retry_backoff_base**attempt
+                    time.sleep(delay)
+
+        raise LLMUnavailableError(
+            f"GroqProvider.complete_json failed after {max_retries} attempts "
+            f"[{self.model}] — {type(last_exc).__name__}: {last_exc}"
+        ) from last_exc
+
+    def _complete_json_once(
+        self,
+        prompt: str,
+        schema: type[BaseModel],
+        max_tokens: int,
+    ) -> BaseModel:
         import httpx
 
         try:

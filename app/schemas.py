@@ -218,6 +218,12 @@ class CancelPendingResponse(BaseModel):
     cancelled_count: int
 
 
+class RetryCandidatesResponse(BaseModel):
+    retried_count: int
+    skipped_count: int = 0
+    candidate_ids: list[str] = Field(default_factory=list)
+
+
 class DeleteAllCandidatesResponse(BaseModel):
     deleted_count: int
 

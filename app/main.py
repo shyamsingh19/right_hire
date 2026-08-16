@@ -16,11 +16,9 @@ from starlette.concurrency import run_in_threadpool
 from app import db
 from app.config import settings
 from app.llm.base import LLMUnavailableError
+from app.logging_config import configure_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-)
+configure_logging("api.log")
 logger = logging.getLogger(__name__)
 
 

@@ -32,6 +32,7 @@ from app.schemas import (
     CandidateUpdate,
     ColumnPreviewResponse,
     DeleteAllCandidatesResponse,
+    RetryCandidatesResponse,
 )
 
 router = APIRouter(prefix="/jobs", tags=["ingest"])
@@ -127,6 +128,93 @@ async def cancel_pending_candidates(
         "User %s cancelled %d pending candidates for job %s", user.id, len(pending_ids), job_id
     )
     return CancelPendingResponse(cancelled_count=len(pending_ids))
+
+
+@router.post("/{job_id}/candidates/{candidate_id}/retry", response_model=CandidateResponse)
+async def retry_candidate(
+    job_id: str,
+    candidate_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Re-queue a single failed candidate using the resume already on file — no new upload,
+    no additional credit charge (it was already deducted on first ingest). Use this for
+    transient failures (rate limits, timeouts); if there's no resume on file at all, the
+    caller should attach one via POST .../candidates/{id}/resume instead."""
+    candidate = await _get_owned_candidate(db, job_id, candidate_id, user)
+
+    if candidate.status != CandidateStatus.failed:
+        raise HTTPException(status_code=400, detail="Only failed candidates can be retried")
+    if not candidate.resume_text and not candidate.resume_url:
+        raise HTTPException(
+            status_code=400,
+            detail="No resume on file for this candidate — attach a resume file to retry them",
+        )
+
+    candidate.status = CandidateStatus.pending
+    await db.commit()
+
+    queue = _get_queue()
+    queued_ids, failed_ids = _enqueue_candidates(queue, job_id, [candidate.id])
+    if failed_ids:
+        candidate.status = CandidateStatus.failed
+        await db.commit()
+        raise HTTPException(status_code=503, detail="Could not queue candidate for retry")
+
+    await db.refresh(candidate)
+    return candidate
+
+
+@router.post("/{job_id}/candidates/retry-failed", response_model=RetryCandidatesResponse)
+async def retry_failed_candidates(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Re-queue every failed candidate in this job that still has a resume on file.
+    Candidates with no resume at all (never downloaded/attached) are skipped — they need a
+    file attached first. No additional credits are charged."""
+    await _get_owned_job(db, job_id, user)
+
+    result = await db.execute(
+        select(Candidate).where(
+            Candidate.job_id == job_id,
+            Candidate.status == CandidateStatus.failed,
+        )
+    )
+    failed_candidates = list(result.scalars().all())
+    retryable = [c for c in failed_candidates if c.resume_text or c.resume_url]
+    skipped_count = len(failed_candidates) - len(retryable)
+
+    if not retryable:
+        return RetryCandidatesResponse(retried_count=0, skipped_count=skipped_count)
+
+    retryable_ids = [c.id for c in retryable]
+    await db.execute(
+        update(Candidate)
+        .where(Candidate.id.in_(retryable_ids))
+        .values(status=CandidateStatus.pending)
+    )
+    await db.commit()
+
+    queue = _get_queue()
+    queued_ids, failed_ids = _enqueue_candidates(queue, job_id, retryable_ids)
+    if failed_ids:
+        await db.execute(
+            update(Candidate).where(Candidate.id.in_(failed_ids)).values(status=CandidateStatus.failed)
+        )
+        await db.commit()
+
+    logger.info(
+        "User %s retried %d failed candidates for job %s (%d skipped, no resume)",
+        user.id,
+        len(queued_ids),
+        job_id,
+        skipped_count,
+    )
+    return RetryCandidatesResponse(
+        retried_count=len(queued_ids), skipped_count=skipped_count, candidate_ids=queued_ids
+    )
 
 
 @router.post("/{job_id}/candidates/preview", response_model=ColumnPreviewResponse)

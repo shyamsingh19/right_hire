@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
 from app.llm.factory import get_provider
+from app.logging_config import configure_logging
 from app.models import Candidate, CandidateStatus, Evaluation, Job
 from app.pipeline.embed import embed_texts, vec_to_bytes
 from app.pipeline.filters import apply_filters
@@ -21,6 +22,7 @@ from app.pipeline.score import aggregate_score, apply_thresholds
 from app.schemas import ParsedJD, ParsedResume
 from app.skills.canonicalize import canonicalize_skill
 
+configure_logging("worker.log")
 logger = logging.getLogger(__name__)
 
 

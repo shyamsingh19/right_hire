@@ -177,6 +177,28 @@ async def cancel_pending_candidates(api_key: str, job_id: str) -> dict:
         return resp.json()
 
 
+async def retry_candidate(api_key: str, job_id: str, candidate_id: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{API_BASE}/jobs/{job_id}/candidates/{candidate_id}/retry",
+            headers=_headers(api_key),
+            timeout=15,
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
+async def retry_failed_candidates(api_key: str, job_id: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{API_BASE}/jobs/{job_id}/candidates/retry-failed",
+            headers=_headers(api_key),
+            timeout=15,
+        )
+        await _raise_for_status(resp)
+        return resp.json()
+
+
 async def preview_candidates(
     api_key: str, job_id: str, filename: str, data: bytes, content_type: str
 ) -> dict:
