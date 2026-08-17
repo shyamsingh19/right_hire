@@ -6,7 +6,6 @@
     "export": "react-router build"
   },
   "dependencies": {
-    "@radix-ui/react-accordion": "1.2.18",
     "@radix-ui/themes": "3.3.0",
     "@react-router/node": "7.18.2",
     "isbot": "5.2.1",

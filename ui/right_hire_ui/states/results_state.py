@@ -16,7 +16,7 @@ _POLL_INTERVAL_SECONDS = 5
 _POLL_MAX_ITERATIONS = 24  # ~2 minutes, then the user can hit "Load Results" again
 
 
-def _build_row(item: dict) -> dict:
+def _build_row(item: dict, required_skills: list[str] | None = None) -> dict:
     c = item["candidate"]
     e = item.get("evaluation")
     rc = e.get("reasoning_card") if e else None
@@ -29,6 +29,7 @@ def _build_row(item: dict) -> dict:
     verdict = ("Unprocessed" if is_error else e["verdict"]) if e else c["status"]
     score = None if is_error else (e.get("score") if e else None)
     score_display = f"{score:.2f}" if score is not None else "—"
+    score_pct_display = f"{score:.0%}" if score is not None else ""
 
     # Rank beats percentile: "#2 of 3" is honest, "Top 100%" out of one candidate is noise.
     rank = rc.get("rank") if rc else None
@@ -45,6 +46,14 @@ def _build_row(item: dict) -> dict:
         matched_skills = rc["matched_skills"]
     elif e and e.get("reasons"):
         matched_skills = e["reasons"].get("matched_skills", [])
+
+    # Missing skills = job's required skills the candidate wasn't credited with matching.
+    # Only meaningful once an evaluation exists — an unprocessed candidate's skills are
+    # unknown, not "missing".
+    missing_skills: list[str] = []
+    if required_skills and not is_error and e is not None:
+        matched_lower = {s.lower() for s in matched_skills}
+        missing_skills = [s for s in required_skills if s.lower() not in matched_lower]
 
     # Score breakdown
     breakdown: dict = (rc.get("score_breakdown") or {}) if rc else {}
@@ -94,10 +103,12 @@ def _build_row(item: dict) -> dict:
         "error": error,
         "verdict": verdict,
         "score_display": score_display,
+        "score_pct_display": score_pct_display,
         "rank_display": rank_display,
         "summary": summary,
         "confidence": confidence,
         "matched_skills": matched_skills,
+        "missing_skills": missing_skills,
         "breakdown_rows": breakdown_rows,
         "model_used": (e.get("model_used") or "N/A") if e else "N/A",
         "rubric_rows": rubric_rows,
@@ -116,10 +127,12 @@ _EMPTY_INSPECT_ROW: dict = {
     "error": "",
     "verdict": "",
     "score_display": "—",
+    "score_pct_display": "",
     "rank_display": "",
     "summary": "",
     "confidence": "",
     "matched_skills": [],
+    "missing_skills": [],
     "breakdown_rows": [],
     "model_used": "",
     "rubric_rows": [],
@@ -153,6 +166,14 @@ class ResultsState(AppState):
     is_recalibrating: bool = False
 
     inspect_candidate_id: str = ""
+
+    # Client-side tab over the already-loaded batch — instant, unlike verdict_filter which
+    # re-queries the server. Keeps all four tab counts visible at once (mirrors the summary
+    # panel), rather than only the counts for whichever filter was last loaded.
+    queue_tab: str = "All"
+
+    def set_queue_tab(self, value: str) -> None:
+        self.queue_tab = value
 
     @rx.var
     def inspect_row(self) -> dict:
@@ -366,6 +387,26 @@ class ResultsState(AppState):
         finally:
             self.is_exporting = False
 
+    async def export_shortlist(self):
+        """Bulk-triage shortcut: exports only Fit-verdict candidates, regardless of
+        whichever queue tab is currently active."""
+        if not self.selected_job_id:
+            return
+        self.is_exporting = True
+        yield
+        try:
+            csv_text = await api_client.export_results_csv(
+                self.api_key, self.selected_job_id, "Fit"
+            )
+            yield rx.download(
+                data=csv_text, filename=f"right_hire_{self.selected_job_id}_shortlist.csv"
+            )
+            yield rx.toast.success("Shortlist exported — Fit candidates only.")
+        except (httpx.HTTPError, api_client.ApiError) as e:
+            yield rx.toast.error(f"Export failed: {e}")
+        finally:
+            self.is_exporting = False
+
     async def delete_candidate(self, candidate_id: str):
         """Permanently removes the candidate and their evaluation — the UI gates this
         behind a confirm dialog since it's the GDPR-style deletion path."""
@@ -512,8 +553,24 @@ class ResultsState(AppState):
                 self.offset = len(page)
 
     @rx.var
+    def selected_job_required_skills(self) -> list[str]:
+        for j in self.jobs:
+            if j["id"] == self.selected_job_id:
+                jd = j.get("jd_parsed") or {}
+                return jd.get("required_skills") or []
+        return []
+
+    @rx.var
     def display_rows(self) -> list[dict[str, Any]]:
-        return [_build_row(item) for item in self.results]
+        required_skills = self.selected_job_required_skills
+        return [_build_row(item, required_skills) for item in self.results]
+
+    @rx.var
+    def queue_rows(self) -> list[dict[str, Any]]:
+        rows = self.display_rows
+        if self.queue_tab == "All":
+            return rows
+        return [r for r in rows if r["verdict"] == self.queue_tab]
 
     @rx.var
     def needs_attention_count(self) -> int:

@@ -14,21 +14,187 @@ from right_hire_ui.components.cards import section_card
 from right_hire_ui.components.empty_state import empty_state
 from right_hire_ui.components.job_picker import job_picker
 from right_hire_ui.components.layout import page_shell
-from right_hire_ui.states.results_state import VERDICT_FILTERS, ResultsState
+from right_hire_ui.states.results_state import ResultsState
 
 RESUME_UPLOAD_ID = "candidate_resume_upload"
 
 
-def _verdict_filter_select() -> rx.Component:
-    return rx.select.root(
-        rx.select.trigger(placeholder="Filter by verdict"),
-        rx.select.content(
-            rx.foreach(VERDICT_FILTERS, lambda v: rx.select.item(v, value=v)),
+# ── Candidate queue (tabbed triage view) ─────────────────────────────────────
+
+
+def _queue_tab_button(label: str, count: rx.Var, value: str) -> rx.Component:
+    is_active = ResultsState.queue_tab == value
+    return rx.button(
+        rx.text(label, size="2", weight="medium"),
+        rx.cond(
+            count > 0,
+            rx.badge(
+                count.to(str),
+                size="1",
+                variant="soft",
+                color_scheme=rx.cond(is_active, "gray", "violet"),
+                radius="full",
+            ),
         ),
-        value=ResultsState.verdict_filter,
-        on_change=ResultsState.set_verdict_filter,
-        width="140px",
-        flex_shrink="0",
+        on_click=ResultsState.set_queue_tab(value),
+        variant=rx.cond(is_active, "solid", "soft"),
+        color_scheme=rx.cond(is_active, "violet", "gray"),
+        size="2",
+    )
+
+
+def _queue_tabs() -> rx.Component:
+    return rx.hstack(
+        _queue_tab_button("All", ResultsState.total_count, "All"),
+        _queue_tab_button("Fit", ResultsState.fit_count, "Fit"),
+        _queue_tab_button("Maybe", ResultsState.maybe_count, "Maybe"),
+        _queue_tab_button("Reject", ResultsState.reject_count, "Reject"),
+        spacing="2",
+        wrap="wrap",
+    )
+
+
+def _missing_skill_tag(skill: str) -> rx.Component:
+    return rx.badge(skill, variant="soft", color_scheme="red", size="1")
+
+
+def _queue_card(row: dict) -> rx.Component:
+    has_eval = row["has_eval"].to(bool)
+    is_error = row["is_error"].to(bool)
+    verdict = row["verdict"].to(str)
+    missing_skills = row["missing_skills"].to(list[str])
+    verdict_color = rx.match(
+        verdict,
+        ("Fit", "green"),
+        ("Maybe", "amber"),
+        ("Reject", "red"),
+        "gray",
+    )
+    border_color = rx.match(
+        verdict,
+        ("Fit", rx.color("green", 7)),
+        ("Maybe", rx.color("amber", 7)),
+        ("Reject", rx.color("red", 7)),
+        rx.color("gray", 5),
+    )
+    return rx.vstack(
+        rx.hstack(
+            rx.text(row["name"].to(str), weight="bold", size="3"),
+            rx.spacer(),
+            rx.cond(
+                is_error,
+                rx.badge(
+                    rx.icon("triangle-alert", size=12),
+                    "Needs attention",
+                    color_scheme="orange",
+                    variant="soft",
+                    size="2",
+                    radius="full",
+                ),
+                rx.cond(
+                    has_eval,
+                    rx.badge(
+                        verdict + " (" + row["score_pct_display"].to(str) + ")",
+                        color_scheme=verdict_color,
+                        variant="soft",
+                        size="2",
+                        radius="full",
+                    ),
+                    status_badge(row["status"].to(str)),
+                ),
+            ),
+            width="100%",
+            align="center",
+        ),
+        rx.text(
+            row["email"].to(str) + " • " + row["yoe"].to(str) + " yrs • " + row["location"].to(str),
+            size="2",
+            color=rx.color("gray", 10),
+        ),
+        rx.cond(
+            missing_skills.length() > 0,
+            rx.hstack(
+                rx.text("Missing:", size="1", color=rx.color("gray", 10)),
+                rx.foreach(missing_skills, _missing_skill_tag),
+                wrap="wrap",
+                gap="1",
+                align="center",
+            ),
+        ),
+        rx.divider(),
+        _row_actions(row),
+        spacing="2",
+        align="start",
+        width="100%",
+        padding="1em 1.25em",
+        border_width="1.5px",
+        border_style="solid",
+        border_color=border_color,
+        border_radius="var(--radius-3)",
+        background=rx.color("gray", 2),
+    )
+
+
+def _candidate_queue() -> rx.Component:
+    rows = ResultsState.queue_rows
+    return rx.vstack(
+        rx.hstack(
+            rx.heading(
+                "Candidate queue (" + ResultsState.total_count.to(str) + ")",
+                size="4",
+                weight="bold",
+            ),
+            rx.spacer(),
+            _queue_tabs(),
+            width="100%",
+            align="center",
+            wrap="wrap",
+            spacing="3",
+        ),
+        rx.cond(
+            rows.length() == 0,
+            empty_state("No candidates in this bucket.", icon="search-x"),
+            rx.vstack(
+                rx.foreach(rows, _queue_card),
+                spacing="3",
+                width="100%",
+            ),
+        ),
+        rx.cond(
+            ResultsState.has_more,
+            rx.button(
+                "Load more",
+                on_click=ResultsState.load_more,
+                loading=ResultsState.is_loading,
+                variant="soft",
+                size="2",
+                margin_top="0.25em",
+            ),
+        ),
+        rx.divider(),
+        rx.hstack(
+            rx.text("Bulk triage:", size="2", weight="medium", color=rx.color("gray", 10)),
+            rx.spacer(),
+            rx.button(
+                rx.icon("download", size=14),
+                "Export CSV",
+                on_click=ResultsState.export_csv,
+                loading=ResultsState.is_exporting,
+                variant="soft",
+                size="2",
+            ),
+            rx.button(
+                rx.icon("list-checks", size=14),
+                "Batch Shortlist",
+                on_click=ResultsState.export_shortlist,
+                loading=ResultsState.is_exporting,
+                size="2",
+            ),
+            width="100%",
+            align="center",
+        ),
+        spacing="4",
+        width="100%",
     )
 
 
@@ -315,124 +481,6 @@ def _candidate_inspector_modal() -> rx.Component:
 # ── Result item ───────────────────────────────────────────────────────────────
 
 
-def _result_header(row: dict) -> rx.Component:
-    has_eval = row["has_eval"].to(bool)
-    is_error = row["is_error"].to(bool)
-    rank_display = row["rank_display"].to(str)
-    return rx.hstack(
-        rx.cond(
-            is_error,
-            rx.badge(
-                rx.icon("triangle-alert", size=12),
-                "Needs attention",
-                color_scheme="orange",
-                variant="soft",
-                size="2",
-                radius="full",
-            ),
-            rx.cond(
-                has_eval,
-                verdict_pill(row["verdict"].to(str)),
-                status_badge(row["status"].to(str)),
-            ),
-        ),
-        rx.text(row["name"].to(str), weight="medium"),
-        rx.text(row["score_display"].to(str), size="2", color=rx.color("gray", 10)),
-        rx.cond(
-            rank_display != "",
-            rx.badge(rank_display, variant="soft", color_scheme="gray", size="1"),
-        ),
-        rx.cond(
-            has_eval & (row["confidence"].to(str) == "Low"),
-            confidence_badge(row["confidence"].to(str)),
-        ),
-        spacing="3",
-        align="center",
-    )
-
-
-def _result_content(row: dict) -> rx.Component:
-    has_eval = row["has_eval"].to(bool)
-    is_error = row["is_error"].to(bool)
-    rubric_rows = row["rubric_rows"].to(list[dict[str, Any]])
-    breakdown_rows = row["breakdown_rows"].to(list[dict[str, Any]])
-    matched_skills = row["matched_skills"].to(list[str])
-    summary = row["summary"].to(str)
-
-    return rx.vstack(
-        # Processing failures get an amber "we couldn't assess this" callout — never the
-        # blue informational one, which reads as a completed judgement.
-        rx.cond(
-            is_error,
-            rx.callout(
-                row["error"].to(str),
-                icon="triangle-alert",
-                color_scheme="orange",
-                size="1",
-            ),
-            rx.cond(
-                has_eval & (summary != ""),
-                rx.callout(summary, icon="info", color_scheme="blue", size="1"),
-            ),
-        ),
-        # Basic info grid
-        rx.grid(
-            rx.vstack(
-                rx.text(f"Email: {row['email'].to(str)}", size="2"),
-                rx.text(f"YOE: {row['yoe'].to(str)}", size="2"),
-                rx.text(f"Location: {row['location'].to(str)}", size="2"),
-                align="start",
-                spacing="1",
-            ),
-            rx.cond(
-                has_eval,
-                rx.vstack(
-                    rx.text(f"Score: {row['score_display'].to(str)}", size="2"),
-                    align="start",
-                    spacing="1",
-                ),
-            ),
-            columns="2",
-            width="100%",
-            spacing="4",
-        ),
-        # Matched skills
-        rx.cond(
-            matched_skills.length() > 0,
-            rx.vstack(
-                rx.text("Matched skills", weight="medium", size="2"),
-                rx.flex(
-                    rx.foreach(matched_skills, _skill_tag),
-                    wrap="wrap",
-                    gap="1",
-                ),
-                align="start",
-                spacing="2",
-                width="100%",
-            ),
-        ),
-        # Score breakdown table
-        rx.cond(
-            breakdown_rows.length() > 0,
-            _score_breakdown_table(breakdown_rows),
-        ),
-        # Per-criterion rubric
-        rx.cond(
-            rubric_rows.length() > 0,
-            rx.vstack(
-                rx.text("Rubric scores", weight="medium", size="2"),
-                rx.foreach(rubric_rows, _rubric_row),
-                align="start",
-                spacing="2",
-                width="100%",
-            ),
-        ),
-        spacing="4",
-        width="100%",
-        padding_top="0.75em",
-    )
-
-
 def _delete_candidate_dialog(row: dict) -> rx.Component:
     """Deleting removes the candidate and their evaluation for good — confirm first."""
     candidate_id = row["candidate_id"].to(str)
@@ -508,19 +556,6 @@ def _row_actions(row: dict) -> rx.Component:
         _delete_candidate_dialog(row),
         width="100%",
         spacing="2",
-    )
-
-
-def _result_item(row: dict) -> rx.Component:
-    return rx.accordion.item(
-        header=_result_header(row),
-        content=rx.vstack(
-            _result_content(row),
-            _row_actions(row),
-            spacing="2",
-            width="100%",
-        ),
-        value=row["candidate_id"].to(str),
     )
 
 
@@ -809,76 +844,49 @@ def results_page() -> rx.Component:
                     ResultsState.jobs.length() == 0,
                     empty_state("No jobs found. Create one on the 'Create Job' page first."),
                     rx.vstack(
-                    rx.hstack(
-                        rx.box(
-                            job_picker(
-                                ResultsState.job_options,
-                                ResultsState.selected_job_id,
-                                ResultsState.set_selected_job_id,
-                            ),
-                            flex="1",
-                            min_width="0",
-                        ),
-                        _verdict_filter_select(),
-                        width="100%",
-                        spacing="3",
-                    ),
-                    rx.hstack(
-                        rx.button(
-                            "Load Results",
-                            on_click=ResultsState.load_results,
-                            loading=ResultsState.is_loading,
-                            size="3",
-                        ),
-                        rx.button(
-                            rx.icon("download", size=14),
-                            "Export CSV",
-                            on_click=ResultsState.export_csv,
-                            loading=ResultsState.is_exporting,
-                            disabled=ResultsState.selected_job_id == "",
-                            size="3",
-                            variant="soft",
-                        ),
-                        _delete_all_candidates_dialog(),
-                        _delete_job_dialog(),
-                        spacing="3",
-                        width="fit-content",
-                    ),
-                    _processing_status_banner(),
-                    _results_summary_panel(),
-                    rx.cond(ResultsState.has_loaded, _score_distribution_card()),
-                    rx.cond(
-                        ResultsState.load_error != "",
-                        rx.callout(
-                            ResultsState.load_error, icon="triangle-alert", color_scheme="red"
-                        ),
-                    ),
-                    rx.cond(
-                        ResultsState.has_loaded & (ResultsState.display_rows.length() == 0),
-                        empty_state("No results found.", icon="search-x"),
-                        rx.fragment(
-                            rx.accordion.root(
-                                rx.foreach(ResultsState.display_rows, _result_item),
-                                type="multiple",
-                                collapsible=True,
-                                variant="surface",
-                                width="100%",
-                            ),
-                            rx.cond(
-                                ResultsState.has_more,
-                                rx.button(
-                                    "Load more",
-                                    on_click=ResultsState.load_more,
-                                    loading=ResultsState.is_loading,
-                                    variant="soft",
-                                    size="2",
-                                    margin_top="0.75em",
+                        rx.hstack(
+                            rx.box(
+                                job_picker(
+                                    ResultsState.job_options,
+                                    ResultsState.selected_job_id,
+                                    ResultsState.set_selected_job_id,
                                 ),
+                                flex="1",
+                                min_width="0",
                             ),
-                            rx.divider(margin_y="1em"),
-                            _attach_resume_block(),
+                            width="100%",
+                            spacing="3",
                         ),
-                    ),
+                        rx.hstack(
+                            rx.button(
+                                "Load Results",
+                                on_click=ResultsState.load_results,
+                                loading=ResultsState.is_loading,
+                                size="3",
+                            ),
+                            _delete_all_candidates_dialog(),
+                            _delete_job_dialog(),
+                            spacing="3",
+                            width="fit-content",
+                        ),
+                        _processing_status_banner(),
+                        _results_summary_panel(),
+                        rx.cond(ResultsState.has_loaded, _score_distribution_card()),
+                        rx.cond(
+                            ResultsState.load_error != "",
+                            rx.callout(
+                                ResultsState.load_error, icon="triangle-alert", color_scheme="red"
+                            ),
+                        ),
+                        rx.cond(
+                            ResultsState.has_loaded & (ResultsState.display_rows.length() == 0),
+                            empty_state("No results found.", icon="search-x"),
+                            rx.fragment(
+                                _candidate_queue(),
+                                rx.divider(margin_y="1em"),
+                                _attach_resume_block(),
+                            ),
+                        ),
                         width="100%",
                         spacing="4",
                     ),
