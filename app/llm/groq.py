@@ -141,12 +141,24 @@ class GroqProvider(LLMProvider):
                     ),
                     mode=instructor.Mode.JSON,
                 )
-                result, completion = client.chat.completions.create_with_completion(
-                    model=self.model,
-                    max_tokens=max_tokens,
-                    response_model=schema,
-                    messages=[{"role": "user", "content": prompt}],
-                )
+                # gpt-oss models are reasoning models — without capping effort they can
+                # burn the whole max_tokens budget on hidden reasoning before emitting
+                # any JSON, causing empty completions (400 json_validate_failed).
+                if "gpt-oss" in self.model:
+                    result, completion = client.chat.completions.create_with_completion(
+                        model=self.model,
+                        max_tokens=max_tokens,
+                        response_model=schema,
+                        messages=[{"role": "user", "content": prompt}],
+                        reasoning_effort="low",
+                    )
+                else:
+                    result, completion = client.chat.completions.create_with_completion(
+                        model=self.model,
+                        max_tokens=max_tokens,
+                        response_model=schema,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
                 usage = completion.usage
                 logger.info(
                     "GroqProvider.complete_json tokens — model=%s prompt=%d completion=%d total=%d",

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     parse_resume_max_tokens: int = 512
     parse_jd_max_tokens: int = 2048
     groq_api_key: str = ""
-    cascade_model: str = "llama-3.3-70b-versatile"
+    cascade_model: str = "openai/gpt-oss-20b"
     # Retry/backoff for transient Groq failures (timeouts, 429s). Exponential:
     # groq_retry_backoff_base ** attempt seconds between tries.
     groq_max_retries: int = 3
