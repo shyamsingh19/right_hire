@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from app.config import settings
 from app.llm.base import LLMProvider
 from app.schemas import JudgeOutput, ParsedJD
 
@@ -44,7 +45,7 @@ def judge_candidate(
     """Call the LLM judge and return a structured JudgeOutput."""
     prompt = build_judge_prompt(matched, parsed_jd, rubric)
     try:
-        return provider.complete_json(prompt, JudgeOutput, max_tokens=300)
+        return provider.complete_json(prompt, JudgeOutput, max_tokens=settings.judge_max_tokens)
     except Exception as exc:
         logger.error(
             "Judge LLM call failed [backend=%s model=%s]: %s",

@@ -109,7 +109,12 @@ app/
 | `GROQ_REQUESTS_PER_MINUTE` | `28` | Client-side throttle on Groq calls — raise once on a paid tier |
 | `GROQ_MAX_RETRIES` | `3` | Retries on transient Groq failure (429/timeout), exp. backoff |
 | `JUDGE_MODEL` | `qwen2.5:7b` | Local evaluation model |
+| `JUDGE_MAX_TOKENS` | `300` | Judge LLM call token cap |
 | `EMBED_MODEL` | `all-MiniLM-L6-v2` | SentenceTransformer embedding model |
+| `RESUME_MAX_CHARS` | `6000` | Resume text cap before parse prompt |
+| `JD_MAX_CHARS` | `4000` | JD text cap before parse prompt |
+| `PARSE_RESUME_MAX_TOKENS` | `512` | Resume parse LLM call token cap |
+| `PARSE_JD_MAX_TOKENS` | `2048` | JD parse LLM call token cap |
 | `DATABASE_URL` | `mysql+pymysql://ats:ats@localhost:3306/ats` | Sync DB string (derived to async automatically) |
 | `REDIS_URL` | `redis://localhost:6379/0` | RQ queue & cache (auto-prefers Upstash if set) |
 | `SIGNUP_FREE_CREDITS` | `3` | Default credits on registration |

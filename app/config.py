@@ -15,8 +15,13 @@ class Settings(BaseSettings):
     llm_backend: str = "local"
     ollama_url: str = "http://localhost:11434"
     judge_model: str = "qwen2.5:7b"
-    judge_max_tokens: int = 200
+    judge_max_tokens: int = 300
     embed_model: str = "all-MiniLM-L6-v2"
+    # Hard caps for prompt inputs (see CLAUDE.md) — raise with care, LLM context/cost tradeoff.
+    resume_max_chars: int = 6000
+    jd_max_chars: int = 4000
+    parse_resume_max_tokens: int = 512
+    parse_jd_max_tokens: int = 2048
     groq_api_key: str = ""
     cascade_model: str = "llama-3.3-70b-versatile"
     # Retry/backoff for transient Groq failures (timeouts, 429s). Exponential:

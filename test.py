@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from groq import Groq
 
 # Load environment variables from the .env file
-load_dotenv()
+load_dotenv(override=True)
 
 # Initialize the Groq client
 try:
@@ -13,7 +13,7 @@ try:
 
     # Send the question to the model
     completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-20b",
         messages=[
             {"role": "user", "content": "What is the capital of Thailand?"}
         ],
@@ -25,3 +25,4 @@ try:
 
 except Exception as e:
     print(f"\n❌ Error: {e}")
+
