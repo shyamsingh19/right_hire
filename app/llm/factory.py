@@ -8,7 +8,7 @@ def get_provider() -> LLMProvider:
     """Instantiate and return the configured LLM provider.
 
     Reads ``settings.llm_backend`` (env var ``LLM_BACKEND``).
-    Valid values: ``local``, ``groq``, ``openai``.
+    Valid values: ``local``, ``groq``, ``openai``, ``cerebras``.
     """
     backend = settings.llm_backend.lower().strip()
 
@@ -27,4 +27,11 @@ def get_provider() -> LLMProvider:
 
         return OpenAIProvider()
 
-    raise ValueError(f"Unknown LLM_BACKEND={backend!r}. Choose one of: local, groq, openai")
+    if backend == "cerebras":
+        from app.llm.cerebras import CerebrasProvider
+
+        return CerebrasProvider()
+
+    raise ValueError(
+        f"Unknown LLM_BACKEND={backend!r}. Choose one of: local, groq, openai, cerebras"
+    )

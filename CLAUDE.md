@@ -104,10 +104,12 @@ app/
 
 | Variable | Default | Role |
 |---|---|---|
-| `LLM_BACKEND` | `local` | `local` \| `groq` \| `openai` |
+| `LLM_BACKEND` | `local` | `local` \| `groq` \| `openai` \| `cerebras` |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama host |
 | `GROQ_REQUESTS_PER_MINUTE` | `28` | Client-side throttle on Groq calls — raise once on a paid tier |
 | `GROQ_MAX_RETRIES` | `3` | Retries on transient Groq failure (429/timeout), exp. backoff |
+| `CEREBRAS_API_KEY` | `""` | Cerebras key, required for `LLM_BACKEND=cerebras` |
+| `CEREBRAS_MODEL` | `gemma-4-31b` | Cerebras chat model |
 | `JUDGE_MODEL` | `qwen2.5:7b` | Local evaluation model |
 | `JUDGE_MAX_TOKENS` | `300` | Judge LLM call token cap |
 | `EMBED_MODEL` | `all-MiniLM-L6-v2` | SentenceTransformer embedding model |

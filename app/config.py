@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_embed_model: str = "text-embedding-3-small"
+    cerebras_api_key: str = ""
+    cerebras_model: str = "gemma-4-31b"
+    # Retry/backoff for transient Cerebras failures (timeouts, 429s). Exponential:
+    # cerebras_retry_backoff_base ** attempt seconds between tries.
+    cerebras_max_retries: int = 3
+    cerebras_retry_backoff_base: float = 2.0
+    # Client-side throttle so we never trip Cerebras' rate limit in the first place.
+    # Raise this in .env once you're on a paid Cerebras plan.
+    cerebras_requests_per_minute: int = 28
 
     # Storage
     database_url: str = "mysql+pymysql://ats:ats@localhost:3306/ats"
