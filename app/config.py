@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # Hard caps for prompt inputs (see CLAUDE.md) — raise with care, LLM context/cost tradeoff.
     resume_max_chars: int = 6000
     jd_max_chars: int = 4000
-    parse_resume_max_tokens: int = 512
+    parse_resume_max_tokens: int = 4096
     parse_jd_max_tokens: int = 2048
     groq_api_key: str = ""
     cascade_model: str = "openai/gpt-oss-20b"
