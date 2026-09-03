@@ -44,6 +44,7 @@ GET /jobs/{id}/results
 - **Normalization:** Interpret scores relative to batch distribution, not absolute numbers.
 - **Cache Key:** `Evaluation.cache_key = sha256(resume_text + json(jd_parsed) + json(weights) + json(thresholds))`.
 - **Delete Constraint:** No DB cascade delete. Deleting a candidate requires deleting its `Evaluation` row first.
+- **Stale-Candidate Watchdog:** RQ's `Retry(max=3)` on `process_candidate` only covers in-process exceptions, not a dead/crashed worker — a candidate can otherwise stay `pending`/`processing` forever. Any worker with `--with-scheduler` self-schedules a recurring sweep (`ensure_stale_sweep_scheduled`, via RQ's native `Repeat`) the first time it handles a job — no cron, no bootstrap step, works under any deploy shape. Every `stale_sweep_interval_minutes` (default 15) it requeues candidates whose `updated_at` is older than `stale_candidate_timeout_minutes` (default 60), then fails them with an error after `stale_candidate_max_retries` (default 3).
 
 ---
 
@@ -122,6 +123,9 @@ app/
 | `SIGNUP_FREE_CREDITS` | `3` | Default credits on registration |
 | `ADMIN_API_KEY` | `""` | Key for manual billing adjustments |
 | `AUTO_CREATE_TABLES` | `true` | Dev table auto-creation (set `false` in prod) |
+| `STALE_CANDIDATE_TIMEOUT_MINUTES` | `60` | Age (by `updated_at`) before the watchdog treats a pending/processing candidate as stuck |
+| `STALE_CANDIDATE_MAX_RETRIES` | `3` | Watchdog requeue attempts before it fails a stuck candidate with an error |
+| `STALE_SWEEP_INTERVAL_MINUTES` | `15` | How often the self-scheduled watchdog sweep runs |
 
 ---
 

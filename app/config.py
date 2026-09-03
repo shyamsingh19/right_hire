@@ -58,6 +58,20 @@ class Settings(BaseSettings):
     # Dev-only convenience: auto-create tables on startup instead of requiring `alembic upgrade
     # head` first. Set to false in any environment where Alembic manages the schema.
     auto_create_tables: bool = True
+    # Stale-candidate watchdog (self-starting — see app/workers/tasks.py:
+    # ensure_stale_sweep_scheduled / _ensure_watchdog_started): a candidate stuck in
+    # pending/processing longer than this is assumed abandoned (worker crashed mid-job, or
+    # was never running at all) rather than legitimately in-flight. Kept well above RQ's own
+    # job_timeout=600s + Retry(max=3) cascade for process_candidate (worst case ~40min) so
+    # the watchdog never races an in-progress RQ-level retry.
+    stale_candidate_timeout_minutes: int = 60
+    # Watchdog re-enqueues a stuck candidate up to this many times before giving up and
+    # marking it failed with a clear error instead of leaving it stuck forever.
+    stale_candidate_max_retries: int = 3
+    # How often the watchdog checks for stale candidates, once scheduled (RQ's native
+    # Repeat). No separate cron or deploy step: any --with-scheduler worker schedules this
+    # itself the first time it processes a candidate.
+    stale_sweep_interval_minutes: int = 15
     # Upstash Redis (optional — takes priority over redis_url when set)
     upstash_redis_rest_url: str = ""
     upstash_redis_rest_token: str = ""

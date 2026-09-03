@@ -103,6 +103,17 @@ class Candidate(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
+    # Bumped on every ORM-level change (status transitions in particular). Used by the
+    # stale-candidate watchdog (app/workers/tasks.py:sweep_stale_candidates) to tell a
+    # candidate that's genuinely still queued/processing apart from one whose worker
+    # died mid-job and will never touch this row again.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    # How many times the watchdog has force-requeued this candidate after finding it
+    # stuck. Capped at settings.stale_candidate_max_retries before it gives up and
+    # marks the candidate failed instead of retrying forever.
+    stale_retries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     job: Mapped[Job] = relationship("Job", back_populates="candidates")
     evaluation: Mapped[Evaluation | None] = relationship(

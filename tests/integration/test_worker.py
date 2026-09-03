@@ -8,6 +8,8 @@ already used in test_pipeline.py.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import numpy as np
 import pytest
 from sqlalchemy import create_engine, select
@@ -194,3 +196,141 @@ def test_process_candidate_fails_loudly_with_no_resume_text_or_url(sync_factory)
         select(Evaluation).where(Evaluation.candidate_id == candidate_id)
     ).scalar_one()
     assert "resume" in eval_obj.reasons["error"].lower()
+
+
+class _FakeQueue:
+    def __init__(self):
+        self.enqueued: list[tuple] = []
+
+    def enqueue(self, *args, **kwargs):
+        self.enqueued.append(args)
+
+
+def _make_stale(sync_factory, candidate_id, minutes_ago: float, stale_retries: int = 0):
+    session = sync_factory()
+    candidate = session.get(Candidate, candidate_id)
+    candidate.updated_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        minutes=minutes_ago
+    )
+    candidate.stale_retries = stale_retries
+    session.commit()
+
+
+def test_sweep_requeues_a_stuck_processing_candidate(sync_factory, monkeypatch):
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
+    session = sync_factory()
+    session.get(Candidate, candidate_id).status = CandidateStatus.processing
+    session.commit()
+    _make_stale(sync_factory, candidate_id, minutes_ago=120, stale_retries=1)
+
+    fake_queue = _FakeQueue()
+    monkeypatch.setattr(tasks_module, "_get_queue", lambda: fake_queue)
+
+    result = tasks_module.sweep_stale_candidates()
+
+    assert result == {"requeued": 1, "failed": 0}
+    assert len(fake_queue.enqueued) == 1
+    session = sync_factory()
+    candidate = session.get(Candidate, candidate_id)
+    assert candidate.status == CandidateStatus.pending
+    assert candidate.stale_retries == 2
+
+
+def test_sweep_fails_candidate_past_max_retries(sync_factory, monkeypatch):
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
+    _make_stale(sync_factory, candidate_id, minutes_ago=120, stale_retries=3)
+
+    fake_queue = _FakeQueue()
+    monkeypatch.setattr(tasks_module, "_get_queue", lambda: fake_queue)
+
+    result = tasks_module.sweep_stale_candidates()
+
+    assert result == {"requeued": 0, "failed": 1}
+    assert fake_queue.enqueued == []
+    session = sync_factory()
+    candidate = session.get(Candidate, candidate_id)
+    assert candidate.status == CandidateStatus.failed
+    eval_obj = session.execute(
+        select(Evaluation).where(Evaluation.candidate_id == candidate_id)
+    ).scalar_one()
+    assert "timed out" in eval_obj.reasons["error"].lower()
+
+
+def test_sweep_leaves_fresh_candidates_alone(sync_factory, monkeypatch):
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
+
+    fake_queue = _FakeQueue()
+    monkeypatch.setattr(tasks_module, "_get_queue", lambda: fake_queue)
+
+    result = tasks_module.sweep_stale_candidates()
+
+    assert result == {"requeued": 0, "failed": 0}
+    session = sync_factory()
+    assert session.get(Candidate, candidate_id).status == CandidateStatus.pending
+
+
+class _FakeScheduledRegistry:
+    def __init__(self, existing_ids=None):
+        self.ids = set(existing_ids or [])
+
+    def get_job_ids(self):
+        return list(self.ids)
+
+
+class _FakeSchedulingQueue(_FakeQueue):
+    def __init__(self, existing_ids=None):
+        super().__init__()
+        self.scheduled_job_registry = _FakeScheduledRegistry(existing_ids)
+
+    def enqueue_in(self, *args, **kwargs):
+        self.enqueued.append((args, kwargs))
+
+
+def test_ensure_stale_sweep_scheduled_is_idempotent(monkeypatch):
+    fake_queue = _FakeSchedulingQueue()
+    monkeypatch.setattr(tasks_module, "_get_queue", lambda: fake_queue)
+
+    tasks_module.ensure_stale_sweep_scheduled()
+    assert len(fake_queue.enqueued) == 1
+    _, kwargs = fake_queue.enqueued[0]
+    assert kwargs["job_id"] == tasks_module._SWEEP_JOB_ID
+
+    # A second call (e.g. next worker restart) must not schedule a duplicate.
+    fake_queue.scheduled_job_registry.ids.add(tasks_module._SWEEP_JOB_ID)
+    tasks_module.ensure_stale_sweep_scheduled()
+    assert len(fake_queue.enqueued) == 1
+
+
+def test_process_candidate_self_starts_watchdog_exactly_once(sync_factory, monkeypatch):
+    """Deployment-friendliness contract: no bootstrap script or cron to wire up — the first
+    candidate any worker processes must schedule the recurring sweep for us."""
+    monkeypatch.setattr(tasks_module, "_watchdog_started", False)
+    calls = []
+    monkeypatch.setattr(tasks_module, "ensure_stale_sweep_scheduled", lambda: calls.append(1))
+
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
+    tasks_module.process_candidate(candidate_id, job_id)
+
+    session = sync_factory()
+    candidate_2 = Candidate(job_id=job_id, resume_text=_RESUME, status=CandidateStatus.pending)
+    session.add(candidate_2)
+    session.commit()
+    tasks_module.process_candidate(candidate_2.id, job_id)
+
+    assert len(calls) == 1
+
+
+def test_process_candidate_survives_watchdog_scheduling_failure(sync_factory, monkeypatch):
+    """A Redis hiccup while scheduling the watchdog must never fail the candidate's own job."""
+    monkeypatch.setattr(tasks_module, "_watchdog_started", False)
+    monkeypatch.setattr(
+        tasks_module,
+        "ensure_stale_sweep_scheduled",
+        lambda: (_ for _ in ()).throw(RuntimeError("redis unreachable")),
+    )
+
+    candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
+    tasks_module.process_candidate(candidate_id, job_id)
+
+    session = sync_factory()
+    assert session.get(Candidate, candidate_id).status == CandidateStatus.done

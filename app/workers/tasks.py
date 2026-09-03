@@ -4,9 +4,11 @@ import hashlib
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, exc
+from rq import Queue, Repeat, Retry
+from sqlalchemy import create_engine, event, exc, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
@@ -126,6 +128,13 @@ def _get_redis():
     return redis_lib.from_url(settings.effective_redis_url, decode_responses=True)
 
 
+def _get_queue() -> Queue:
+    import redis as redis_lib
+
+    r = redis_lib.from_url(settings.effective_redis_url)
+    return Queue("ats", connection=r)
+
+
 def parse_job_description(job_id: str) -> None:
     """Deferred JD parse for a job created while the LLM backend was down (see
     app/api/jobs.py:create_job's LLMUnavailableError fallback). Runs inside an RQ
@@ -154,6 +163,7 @@ def parse_job_description(job_id: str) -> None:
 
 def process_candidate(candidate_id: str, job_id: str) -> None:
     """Full pipeline for a single candidate. Runs inside an RQ worker."""
+    _ensure_watchdog_started()
     session = _sync_session()
     candidate: Candidate | None = None
     try:
@@ -325,3 +335,129 @@ def _cache_verdict(cache_key: str, result: dict) -> None:
         r.setex(f"verdict:{cache_key}", 86400 * 7, json.dumps(result))
     except Exception as exc:
         logger.warning("Failed to cache verdict: %s", exc)
+
+
+def sweep_stale_candidates() -> dict:
+    """Find candidates stuck in pending/processing (worker crashed mid-job, or was never
+    running at all — see CLAUDE.md/RQ's own Retry only covers in-process exceptions, not a
+    dead worker) and either requeue them or, past stale_candidate_max_retries, fail them
+    with a clear error instead of leaving them stuck forever. Meant to run on a cron —
+    see scripts/sweep_stale_candidates.py. Sync/idempotent: safe to run concurrently or
+    back-to-back.
+    """
+    # Naive UTC to match updated_at, which is populated by the DB's naive func.now().
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(minutes=settings.stale_candidate_timeout_minutes)
+    session = _sync_session()
+    requeued = 0
+    failed = 0
+    try:
+        stale = session.scalars(
+            select(Candidate).where(
+                Candidate.status.in_([CandidateStatus.pending, CandidateStatus.processing]),
+                Candidate.updated_at < cutoff,
+            )
+        ).all()
+
+        queue = _get_queue()
+        for candidate in stale:
+            if candidate.stale_retries >= settings.stale_candidate_max_retries:
+                candidate.status = CandidateStatus.failed
+                session.add(
+                    Evaluation(
+                        candidate_id=candidate.id,
+                        job_id=candidate.job_id,
+                        reasons={
+                            "error": (
+                                f"Processing timed out after {candidate.stale_retries} "
+                                "automatic retries — the worker likely crashed mid-job. "
+                                "Retry manually once the worker is confirmed healthy."
+                            )
+                        },
+                        model_used="watchdog_timeout",
+                    )
+                )
+                failed += 1
+            else:
+                candidate.stale_retries += 1
+                candidate.status = CandidateStatus.pending
+                try:
+                    queue.enqueue(
+                        "app.workers.tasks.process_candidate",
+                        candidate.id,
+                        candidate.job_id,
+                        job_timeout=600,
+                        retry=Retry(max=3, interval=[10, 30, 60]),
+                    )
+                    requeued += 1
+                except Exception as exc:
+                    logger.exception("sweep: failed to requeue candidate %s", candidate.id)
+                    candidate.status = CandidateStatus.failed
+                    session.add(
+                        Evaluation(
+                            candidate_id=candidate.id,
+                            job_id=candidate.job_id,
+                            reasons={
+                                "error": f"Could not requeue after stale timeout: {exc}"[:500]
+                            },
+                            model_used="watchdog_timeout",
+                        )
+                    )
+                    failed += 1
+            session.commit()
+    finally:
+        session.close()
+
+    if requeued or failed:
+        logger.info("sweep_stale_candidates: requeued=%d failed=%d", requeued, failed)
+    return {"requeued": requeued, "failed": failed}
+
+
+# Fixed id so ensure_stale_sweep_scheduled() is idempotent — re-running it (e.g. every
+# worker restart) must not pile up duplicate recurring jobs in RQ's scheduled registry.
+_SWEEP_JOB_ID = "stale-candidate-sweep"
+
+
+def ensure_stale_sweep_scheduled() -> None:
+    """Make the stale-candidate sweep self-perpetuating — no separate cron, deploy step,
+    or process-manager entry to remember to wire up. Uses RQ's native Repeat (the worker
+    just needs --with-scheduler, which `make worker` already passes): once scheduled, RQ
+    itself re-enqueues sweep_stale_candidates every stale_sweep_interval_minutes
+    indefinitely. Safe to call repeatedly — a no-op once the recurring job is scheduled.
+    """
+    queue = _get_queue()
+    if _SWEEP_JOB_ID in queue.scheduled_job_registry.get_job_ids():
+        return
+
+    interval_seconds = settings.stale_sweep_interval_minutes * 60
+    queue.enqueue_in(
+        timedelta(seconds=interval_seconds),
+        "app.workers.tasks.sweep_stale_candidates",
+        job_id=_SWEEP_JOB_ID,
+        # RQ's Repeat wants a finite count; this is ~285 years' worth of runs at the
+        # default 15-minute interval, i.e. effectively forever for any real deployment.
+        repeat=Repeat(times=10_000_000, interval=interval_seconds),
+    )
+    logger.info(
+        "Scheduled recurring stale-candidate sweep every %d minutes",
+        settings.stale_sweep_interval_minutes,
+    )
+
+
+_watchdog_started = False
+
+
+def _ensure_watchdog_started() -> None:
+    """Trigger ensure_stale_sweep_scheduled() once per worker process, the first time it
+    handles a job — so the watchdog comes alive under any deploy shape (Procfile, Dockerfile
+    CMD, k8s, systemd, `make worker`) without a dedicated startup script. Best-effort: a
+    Redis hiccup here must never fail the candidate job that triggered it.
+    """
+    global _watchdog_started
+    if _watchdog_started:
+        return
+    _watchdog_started = True
+    try:
+        ensure_stale_sweep_scheduled()
+    except Exception:
+        logger.warning("Could not schedule stale-candidate watchdog", exc_info=True)
