@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, exc
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
@@ -33,6 +34,31 @@ logger = logging.getLogger(__name__)
 _sync_engine = create_engine(
     settings.database_url, pool_pre_ping=True, pool_recycle=280, pool_size=2, max_overflow=0
 )
+
+
+# RQ's default Worker forks a fresh OS process ("work horse") per job. Without this guard,
+# a forked child inherits the parent's already-open MySQL sockets and reuses them
+# concurrently with the parent, which corrupts the connection and leaks it — MySQL keeps
+# counting the orphaned socket against max_user_connections until it times out. Tag every
+# connection with the PID that opened it, and on checkout in a different PID, drop the
+# reference (without closing — that would kill the parent's live socket) so the pool opens
+# a genuinely new connection instead of touching the inherited one.
+@event.listens_for(_sync_engine, "connect")
+def _tag_connection_pid(dbapi_connection, connection_record):
+    connection_record.info["pid"] = os.getpid()
+
+
+@event.listens_for(_sync_engine, "checkout")
+def _guard_forked_connection(dbapi_connection, connection_record, connection_proxy):
+    pid = os.getpid()
+    if connection_record.info.get("pid") != pid:
+        connection_record.dbapi_connection = connection_proxy.dbapi_connection = None
+        raise exc.DisconnectionError(
+            f"Connection record belongs to pid {connection_record.info.get('pid')}, "
+            f"attempting to check out in pid {pid}"
+        )
+
+
 _SyncSessionLocal = sessionmaker(bind=_sync_engine, expire_on_commit=False)
 
 

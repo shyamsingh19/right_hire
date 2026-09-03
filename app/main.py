@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError, TimeoutError as SATimeoutError
 from starlette.concurrency import run_in_threadpool
 
 from app import db
@@ -96,6 +97,29 @@ async def llm_unavailable_handler(request: Request, exc: LLMUnavailableError):
         status_code=503,
         content={
             "detail": "The AI model backend is temporarily unavailable. Please try again shortly.",
+            "request_id": request_id,
+        },
+    )
+
+
+@app.exception_handler(OperationalError)
+@app.exception_handler(SATimeoutError)
+async def db_pool_exhausted_handler(request: Request, exc: Exception):
+    """The hosted MySQL's max_user_connections cap (or our own pool_timeout) was hit —
+    a transient capacity problem, not a bug in the request. Surface it as a retryable
+    503 like LLMUnavailableError instead of a raw 500."""
+    request_id = request.headers.get("X-Request-ID", "unknown")
+    logger.warning(
+        "DB connection pool exhausted on %s %s (request_id=%s): %s",
+        request.method,
+        request.url.path,
+        request_id,
+        exc,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "The database is temporarily at capacity. Please retry shortly.",
             "request_id": request_id,
         },
     )
