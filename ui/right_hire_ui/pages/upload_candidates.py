@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import reflex as rx
 
+from right_hire_ui.components.buttons import button
 from right_hire_ui.components.cards import section_card
 from right_hire_ui.components.empty_state import empty_state
 from right_hire_ui.components.job_picker import job_picker
@@ -126,22 +127,20 @@ def _mapping_panel() -> rx.Component:
         ),
         rx.divider(),
         rx.hstack(
-            rx.button(
+            button(
                 "Cancel",
-                variant="soft",
-                color_scheme="gray",
+                tier="ghost",
                 on_click=UploadState.cancel_mapping,
                 size="2",
             ),
             rx.tooltip(
-                rx.button(
+                button(
                     rx.icon("upload", size=16),
                     "Confirm & Upload",
                     on_click=UploadState.confirm_upload,
                     loading=UploadState.is_uploading,
                     disabled=~UploadState.mapping_is_valid,
                     size="2",
-                    color_scheme="violet",
                 ),
                 content=rx.cond(
                     UploadState.mapping_error != "",
@@ -158,7 +157,7 @@ def _mapping_panel() -> rx.Component:
         padding="1.5em",
         border=f"1px solid {rx.color('violet', 5)}",
         border_radius="var(--radius-4)",
-        background=rx.color("violet", 1),
+        background="var(--rh-inset)",
     )
 
 
@@ -234,82 +233,122 @@ def upload_candidates_page() -> rx.Component:
                 rx.center(rx.spinner(size="3"), padding="2em"),
                 rx.cond(
                     UploadState.jobs.length() == 0,
-                    empty_state("No jobs found. Create one on the 'Create Job' page first."),
-                    rx.vstack(
-                    job_picker(
-                        UploadState.job_options,
-                        UploadState.selected_job_id,
-                        UploadState.set_selected_job_id,
+                    empty_state(
+                        "Create a job first",
+                        "Before uploading candidates, you need a job with screening criteria "
+                        "for them to be evaluated against.",
+                        icon="file-plus",
+                        cta_label="Create a Job →",
+                        cta_href="/",
                     ),
-                    rx.cond(
-                        ~UploadState.show_mapping,
-                        rx.vstack(
-                            rx.upload(
-                                rx.vstack(
-                                    rx.icon("cloud-upload", size=28, color=rx.color("gray", 9)),
-                                    rx.text("Drag & drop, or click to select a file", size="2"),
-                                    rx.text(".xlsx or .csv", size="1", color=rx.color("gray", 10)),
+                    rx.vstack(
+                        job_picker(
+                            UploadState.job_options,
+                            UploadState.selected_job_id,
+                            UploadState.set_selected_job_id,
+                        ),
+                        rx.cond(
+                            ~UploadState.show_mapping,
+                            rx.vstack(
+                                rx.upload(
+                                    rx.vstack(
+                                        rx.icon("cloud-upload", size=28, color=rx.color("gray", 9)),
+                                        rx.text("Drag & drop, or click to select a file", size="2"),
+                                        rx.text(
+                                            ".xlsx or .csv", size="1", color=rx.color("gray", 10)
+                                        ),
+                                        align="center",
+                                        spacing="1",
+                                    ),
+                                    rx.foreach(
+                                        rx.selected_files(UPLOAD_ID),
+                                        lambda f: rx.badge(
+                                            f, variant="soft", color_scheme="violet"
+                                        ),
+                                    ),
+                                    id=UPLOAD_ID,
+                                    multiple=False,
+                                    max_files=1,
+                                    accept={
+                                        "text/csv": [".csv"],
+                                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
+                                            ".xlsx"
+                                        ],
+                                    },
+                                    border=f"1.5px dashed {rx.color('gray', 7)}",
+                                    border_radius="var(--radius-4)",
+                                    padding="2em",
+                                    width="100%",
+                                ),
+                                rx.hstack(
+                                    button(
+                                        rx.cond(
+                                            UploadState.is_previewing,
+                                            rx.spinner(size="2"),
+                                            rx.icon("scan", size=16),
+                                        ),
+                                        rx.cond(
+                                            UploadState.is_previewing,
+                                            "Detecting columns…",
+                                            "Preview & Map Columns",
+                                        ),
+                                        on_click=UploadState.handle_upload(
+                                            rx.upload_files(upload_id=UPLOAD_ID)
+                                        ),
+                                        loading=UploadState.is_previewing,
+                                        size="3",
+                                    ),
+                                    rx.spacer(),
+                                    rx.link(
+                                        "Download template (.csv)",
+                                        href="/candidates_template.csv",
+                                        download=True,
+                                        size="2",
+                                        color=rx.color("violet", 11),
+                                    ),
+                                    width="100%",
                                     align="center",
-                                    spacing="1",
                                 ),
-                                rx.foreach(
-                                    rx.selected_files(UPLOAD_ID),
-                                    lambda f: rx.badge(f, variant="soft", color_scheme="violet"),
+                                width="100%",
+                                spacing="4",
+                            ),
+                            _mapping_panel(),
+                        ),
+                        rx.cond(
+                            UploadState.upload_error != "",
+                            rx.callout(
+                                UploadState.upload_error,
+                                icon="triangle-alert",
+                                color_scheme="red",
+                            ),
+                        ),
+                        rx.cond(
+                            UploadState.upload_result_message != "",
+                            rx.vstack(
+                                rx.callout(
+                                    UploadState.upload_result_message,
+                                    icon="check",
+                                    color_scheme="green",
+                                    width="100%",
                                 ),
-                                id=UPLOAD_ID,
-                                multiple=False,
-                                max_files=1,
-                                accept={
-                                    "text/csv": [".csv"],
-                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
-                                        ".xlsx"
-                                    ],
-                                },
-                                border=f"1.5px dashed {rx.color('gray', 7)}",
-                                border_radius="var(--radius-4)",
-                                padding="2em",
+                                rx.hstack(
+                                    rx.link(
+                                        button("View Results →", size="3"),
+                                        href="/results?job=" + UploadState.selected_job_id,
+                                    ),
+                                    button(
+                                        "Upload more candidates",
+                                        tier="tertiary",
+                                        on_click=UploadState.upload_another,
+                                        size="3",
+                                    ),
+                                    spacing="3",
+                                    align="center",
+                                ),
+                                spacing="3",
                                 width="100%",
                             ),
-                            rx.button(
-                                rx.cond(
-                                    UploadState.is_previewing,
-                                    rx.spinner(size="2"),
-                                    rx.icon("scan", size=16),
-                                ),
-                                rx.cond(
-                                    UploadState.is_previewing,
-                                    "Detecting columns…",
-                                    "Preview & Map Columns",
-                                ),
-                                on_click=UploadState.handle_upload(
-                                    rx.upload_files(upload_id=UPLOAD_ID)
-                                ),
-                                loading=UploadState.is_previewing,
-                                size="3",
-                                width="fit-content",
-                                color_scheme="violet",
-                            ),
-                            width="100%",
-                            spacing="4",
                         ),
-                        _mapping_panel(),
-                    ),
-                    rx.cond(
-                        UploadState.upload_error != "",
-                        rx.callout(
-                            UploadState.upload_error,
-                            icon="triangle-alert",
-                            color_scheme="red",
-                        ),
-                    ),
-                    rx.cond(
-                        UploadState.upload_result_message != "",
-                        rx.callout(
-                            UploadState.upload_result_message,
-                            icon="check",
-                            color_scheme="green",
-                        ),
-                    ),
                         _progress_panel(),
                         width="100%",
                         spacing="4",

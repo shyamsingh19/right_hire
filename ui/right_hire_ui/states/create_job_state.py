@@ -154,6 +154,14 @@ class CreateJobState(AppState):
     def back_to_step_1(self) -> None:
         self.step = 1
 
+    def create_another(self) -> None:
+        """Dismisses the success panel and returns to an empty step 1."""
+        self.created_job_id = ""
+        self.created_job_title = ""
+        self.created_job_jd_parsed = {}
+        self.step = 1
+        self.error_message = ""
+
     async def submit(self):
         self.error_message = ""
         if not self.api_key:

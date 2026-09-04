@@ -24,6 +24,9 @@ def verdict_pill(verdict: rx.Var[str] | str) -> rx.Component:
 
 
 def status_badge(status: rx.Var[str] | str) -> rx.Component:
+    """Processing state for a candidate with no evaluation yet. Labels are written
+    out rather than echoing the raw DB status, so the queue reads consistently
+    alongside the verdict pills."""
     color = rx.match(
         status,
         ("pending", "gray"),
@@ -32,8 +35,16 @@ def status_badge(status: rx.Var[str] | str) -> rx.Component:
         ("failed", "red"),
         "gray",
     )
-    return rx.badge(
+    label = rx.match(
         status,
+        ("pending", "Queued"),
+        ("processing", "Processing…"),
+        ("done", "Done"),
+        ("failed", "Failed"),
+        status,
+    )
+    return rx.badge(
+        label,
         color_scheme=color,
         variant="soft",
         size="2",

@@ -8,7 +8,9 @@ import reflex as rx
 from right_hire_ui.components.theme import STYLESHEETS, get_theme
 from right_hire_ui.pages.create_job import create_job_page
 from right_hire_ui.pages.results import results_page
+from right_hire_ui.pages.settings import settings_page
 from right_hire_ui.pages.upload_candidates import upload_candidates_page
+from right_hire_ui.states.app_state import AppState
 from right_hire_ui.states.create_job_state import CreateJobState
 from right_hire_ui.states.results_state import ResultsState
 from right_hire_ui.states.upload_state import UploadState
@@ -35,11 +37,17 @@ app.add_page(
     upload_candidates_page,
     route="/upload",
     title="Right Hire — Upload Candidates",
-    on_load=UploadState.load_page_data,
+    on_load=[UploadState.load_page_data, UploadState.init_from_query],
+)
+app.add_page(
+    settings_page,
+    route="/settings",
+    title="Right Hire — Settings",
+    on_load=AppState.load_page_data,
 )
 app.add_page(
     results_page,
     route="/results",
     title="Right Hire — Results",
-    on_load=ResultsState.load_page_data,
+    on_load=[ResultsState.load_page_data, ResultsState.init_from_query],
 )

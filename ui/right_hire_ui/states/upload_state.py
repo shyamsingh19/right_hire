@@ -50,6 +50,27 @@ class UploadState(AppState):
     def set_selected_job_id(self, value: str) -> None:
         self.selected_job_id = value
 
+    def init_from_query(self) -> None:
+        """Pre-selects the job passed as ?job=<id> — how Create Job hands off after
+        activating a job, so the dropdown is already right."""
+        job_id = self.router.url.query_parameters.get("job", "")
+        if job_id and any(j["id"] == job_id for j in self.jobs):
+            self.selected_job_id = job_id
+
+    @rx.var
+    def selected_job_title(self) -> str:
+        for j in self.jobs:
+            if j["id"] == self.selected_job_id:
+                return j["title"]
+        return ""
+
+    def upload_another(self) -> None:
+        """Resets just the upload leg — same job stays selected."""
+        self.upload_result_message = ""
+        self.upload_error = ""
+        self.show_progress = False
+        self.progress = {}
+
     def set_mapping_field(self, field: str, value: str) -> None:
         self.mapping[field] = value
 
@@ -139,8 +160,10 @@ class UploadState(AppState):
                 self._pending_content_type,
                 column_mapping=final_mapping,
             )
+            queued = result["queued_count"]
             self.upload_result_message = (
-                f"Enqueued {result['queued_count']} candidates for evaluation."
+                f"{queued} candidate{'s' if queued != 1 else ''} uploaded and queued for "
+                "evaluation. This typically takes 1–2 minutes per candidate."
             )
             if result.get("failed_count"):
                 self.upload_result_message += (

@@ -160,7 +160,12 @@ class AppState(rx.State):
 
     @rx.var
     def job_options(self) -> list[tuple[str, str]]:
-        return [(j["id"], f"{j['title']} — {j['id']}") for j in self.jobs]
+        """Label is the title only — the id stays the option's value, never shown."""
+        return [(j["id"], j["title"]) for j in self.jobs]
+
+    @rx.var
+    def user_initials(self) -> str:
+        return (self.user_email[:2] or "RH").upper()
 
     @rx.var
     def is_authenticated(self) -> bool:

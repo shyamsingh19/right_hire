@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import reflex as rx
 
+from right_hire_ui.components.buttons import button
 from right_hire_ui.components.cards import section_card
 from right_hire_ui.components.layout import page_shell
 from right_hire_ui.states.create_job_state import CreateJobState
@@ -110,7 +111,7 @@ def _step_1() -> rx.Component:
             CreateJobState.error_message != "",
             rx.callout(CreateJobState.error_message, icon="triangle-alert", color_scheme="red"),
         ),
-        rx.button(
+        button(
             rx.icon("sparkles", size=14),
             "Parse JD Criteria",
             on_click=CreateJobState.parse_criteria,
@@ -206,7 +207,7 @@ def _skills_editor() -> rx.Component:
                 size="2",
                 width="100%",
             ),
-            rx.button("Add", on_click=CreateJobState.add_required_skill, size="2", variant="soft"),
+            button("Add", tier="secondary", on_click=CreateJobState.add_required_skill, size="2"),
             width="100%",
             spacing="2",
         ),
@@ -254,11 +255,11 @@ def _weights_editor() -> rx.Component:
                     color_scheme="amber",
                     size="1",
                 ),
-                rx.button(
+                button(
                     "Auto-normalize",
+                    tier="tertiary",
                     on_click=CreateJobState.normalize_weights,
                     size="1",
-                    variant="soft",
                 ),
                 align="center",
                 spacing="2",
@@ -333,9 +334,7 @@ def _step_2() -> rx.Component:
                     size="2",
                     width="100%",
                 ),
-                rx.button(
-                    "Add", on_click=CreateJobState.add_must_have, size="2", variant="soft"
-                ),
+                button("Add", tier="secondary", on_click=CreateJobState.add_must_have, size="2"),
                 width="100%",
                 spacing="2",
             ),
@@ -368,15 +367,14 @@ def _step_2() -> rx.Component:
             rx.callout(CreateJobState.error_message, icon="triangle-alert", color_scheme="red"),
         ),
         rx.hstack(
-            rx.button(
+            button(
                 rx.icon("arrow-left", size=14),
                 "Back",
+                tier="ghost",
                 on_click=CreateJobState.back_to_step_1,
-                variant="soft",
-                color_scheme="gray",
                 size="3",
             ),
-            rx.button(
+            button(
                 "Confirm & Activate Job",
                 on_click=CreateJobState.submit,
                 loading=CreateJobState.is_submitting,
@@ -399,6 +397,8 @@ def _summary_item(label: str, value) -> rx.Component:
 
 
 def _created_job_panel() -> rx.Component:
+    """Shown instead of the form once a job is live — the next step is uploading
+    candidates for it, so that CTA is the only primary button here."""
     return rx.cond(
         CreateJobState.created_job_id != "",
         rx.vstack(
@@ -409,19 +409,13 @@ def _created_job_panel() -> rx.Component:
             ),
             rx.box(
                 rx.grid(
-                    _summary_item(
-                        "Minimum experience", f"{CreateJobState.min_yoe:.1f} yrs"
-                    ),
+                    _summary_item("Minimum experience", f"{CreateJobState.min_yoe:.1f} yrs"),
                     _summary_item(
                         "Location",
                         rx.cond(CreateJobState.location != "", CreateJobState.location, "Any"),
                     ),
-                    _summary_item(
-                        "Fit threshold", f"{CreateJobState.fit_threshold:.2f}"
-                    ),
-                    _summary_item(
-                        "Maybe threshold", f"{CreateJobState.maybe_threshold:.2f}"
-                    ),
+                    _summary_item("Fit threshold", f"{CreateJobState.fit_threshold:.2f}"),
+                    _summary_item("Maybe threshold", f"{CreateJobState.maybe_threshold:.2f}"),
                     columns="2",
                     spacing="4",
                     width="100%",
@@ -477,6 +471,24 @@ def _created_job_panel() -> rx.Component:
                 border_radius="var(--radius-3)",
                 width="100%",
             ),
+            rx.hstack(
+                rx.link(
+                    button(
+                        "Upload candidates for " + CreateJobState.created_job_title + " →",
+                        size="3",
+                    ),
+                    href="/upload?job=" + CreateJobState.created_job_id,
+                ),
+                button(
+                    "Create another job",
+                    tier="tertiary",
+                    on_click=CreateJobState.create_another,
+                    size="3",
+                ),
+                spacing="3",
+                align="center",
+                wrap="wrap",
+            ),
             width="100%",
             spacing="3",
         ),
@@ -487,8 +499,13 @@ def create_job_page() -> rx.Component:
     return page_shell(
         section_card(
             "Create a New Job",
-            _step_indicator(),
-            rx.cond(CreateJobState.step == 1, _step_1(), _step_2()),
-            _created_job_panel(),
+            rx.cond(
+                CreateJobState.created_job_id != "",
+                _created_job_panel(),
+                rx.fragment(
+                    _step_indicator(),
+                    rx.cond(CreateJobState.step == 1, _step_1(), _step_2()),
+                ),
+            ),
         ),
     )

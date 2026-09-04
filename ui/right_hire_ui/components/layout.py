@@ -1,9 +1,14 @@
-"""Persistent sidebar nav + header — replaces `st.sidebar.radio` page switching."""
+"""Persistent sidebar nav + page shell.
+
+The sidebar footer is deliberately thin: identity, credit balance, a Settings
+link. Credit top-ups, request history and key rotation live on /settings.
+"""
 
 from __future__ import annotations
 
 import reflex as rx
 
+from right_hire_ui.components.buttons import button
 from right_hire_ui.states.app_state import AppState
 
 NAV_ITEMS = [
@@ -25,111 +30,32 @@ def _nav_link(route: str, label: str, icon: str) -> rx.Component:
         href=route,
         class_name="nav-link",
         padding="0.6em 0.9em",
-        border_radius="var(--radius-4)",
+        border_radius="var(--radius-3)",
         width="100%",
-        color=rx.cond(is_active, rx.color("violet", 12), rx.color("gray", 11)),
-        background=rx.cond(is_active, rx.color("violet", 4), "transparent"),
-        weight=rx.cond(is_active, "bold", "regular"),
+        color=rx.cond(is_active, rx.color("violet", 11), rx.color("gray", 11)),
+        background=rx.cond(is_active, rx.color("violet", 3), "transparent"),
+        border_left_color=rx.cond(is_active, rx.color("violet", 9), "transparent"),
+        weight=rx.cond(is_active, "medium", "regular"),
         underline="none",
-        _hover={"background": rx.color("violet", 3)},
+        _hover={"background": rx.color("violet", 2)},
     )
 
 
-def _credit_request_row(item: dict) -> rx.Component:
-    status = item["status"].to(str)
-    scheme = rx.match(status, ("granted", "green"), ("pending", "amber"), "gray")
-    return rx.hstack(
-        rx.text(item["created_at"].to(str), size="1", color=rx.color("gray", 10)),
-        rx.spacer(),
-        rx.badge(status, color_scheme=scheme, variant="soft", size="1"),
-        width="100%",
-        align="center",
-    )
-
-
-def _credits_block() -> rx.Component:
-    """1 credit = 1 candidate evaluated. Top-ups are approved by a human out-of-band,
-    so this only asks — it never charges (see app/api/billing.py)."""
+def _credit_pill() -> rx.Component:
+    """1 credit = 1 candidate evaluated. Red at zero, since uploads then fail."""
     out_of_credits = (AppState.credits == "0") | (AppState.credits == "")
-    credits_num = AppState.credits.to(int)
-    credit_scheme = rx.cond(out_of_credits, "red", rx.cond(credits_num > 10, "grass", "amber"))
-    return rx.vstack(
-        rx.hstack(
-            rx.icon("coins", size=14, color=rx.color("amber", 9)),
-            rx.text("Credits", size="1", color=rx.color("gray", 11)),
-            rx.spacer(),
-            rx.cond(
-                AppState.is_loading_account,
-                rx.spinner(size="1"),
-                rx.badge(
-                    AppState.credits,
-                    variant="soft",
-                    color_scheme=credit_scheme,
-                    size="1",
-                ),
-            ),
-            align="center",
-            width="100%",
-        ),
-        rx.cond(
-            ~AppState.is_loading_account & out_of_credits,
-            rx.text(
-                "Out of credits — uploads will be rejected.",
-                size="1",
-                color=rx.color("red", 9),
-                role="alert",
-            ),
-        ),
-        rx.cond(
-            AppState.has_pending_credit_request,
-            rx.callout(
-                "A credit request is pending operator approval.",
-                icon="clock",
-                color_scheme="amber",
-                size="1",
-            ),
-        ),
-        rx.button(
-            "Request more",
-            on_click=AppState.request_credits,
-            loading=AppState.is_requesting_credits,
-            size="1",
+    return rx.cond(
+        AppState.is_loading_account,
+        rx.spinner(size="1"),
+        rx.badge(
+            rx.icon("zap", size=11),
+            AppState.credits,
             variant="soft",
-            width="100%",
+            color_scheme=rx.cond(out_of_credits, "red", "violet"),
+            size="1",
+            radius="full",
+            aria_label="Credits remaining: " + AppState.credits,
         ),
-        rx.cond(
-            AppState.credits_message != "",
-            rx.text(AppState.credits_message, size="1", color=rx.color("gray", 11)),
-        ),
-        rx.cond(
-            AppState.payment_link != "",
-            rx.link(
-                "Open payment page →",
-                href=AppState.payment_link,
-                is_external=True,
-                size="1",
-                color=rx.color("violet", 10),
-            ),
-        ),
-        rx.cond(
-            AppState.support_contact != "",
-            rx.text(
-                "Or reach out: " + AppState.support_contact,
-                size="1",
-                color=rx.color("gray", 10),
-            ),
-        ),
-        rx.cond(
-            AppState.credit_requests.length() > 0,
-            rx.vstack(
-                rx.text("Request history", size="1", weight="medium", color=rx.color("gray", 11)),
-                rx.foreach(AppState.credit_requests, _credit_request_row),
-                spacing="1",
-                width="100%",
-            ),
-        ),
-        spacing="2",
-        width="100%",
     )
 
 
@@ -137,30 +63,50 @@ def _account_widget() -> rx.Component:
     """Every API call needs an X-API-Key — this is the only place a user gets or pastes one."""
     signed_in = rx.vstack(
         rx.hstack(
-            rx.icon("user", size=14, color=rx.color("grass", 9)),
-            rx.cond(
-                AppState.user_email != "",
-                rx.text(AppState.user_email, size="1", color=rx.color("gray", 11), no_of_lines=1),
-                rx.text("Connected", size="1", color=rx.color("gray", 11)),
+            rx.avatar(
+                fallback=AppState.user_initials,
+                size="1",
+                radius="full",
+                color_scheme="violet",
+                variant="solid",
+            ),
+            rx.text(
+                rx.cond(AppState.user_email != "", AppState.user_email, "Connected"),
+                size="1",
+                color=rx.color("gray", 11),
+                no_of_lines=1,
             ),
             rx.spacer(),
-            rx.link("Log out", on_click=AppState.log_out, size="1", color=rx.color("gray", 9)),
+            _credit_pill(),
             align="center",
+            spacing="2",
             width="100%",
         ),
-        _credits_block(),
-        rx.divider(),
-        rx.tooltip(
-            rx.button(
-                rx.icon("refresh-cw", size=12),
-                "Rotate key",
-                on_click=AppState.rotate_key,
-                loading=AppState.is_rotating_key,
+        rx.cond(
+            (AppState.credits == "0") & ~AppState.is_loading_account,
+            rx.text(
+                "Out of credits — uploads will be rejected.",
                 size="1",
-                variant="ghost",
-                width="100%",
+                color=rx.color("red", 10),
+                role="alert",
             ),
-            content="Issues a new key and saves it here. The current key stops working immediately.",
+        ),
+        rx.hstack(
+            rx.link(
+                rx.hstack(
+                    rx.icon("settings", size=12),
+                    rx.text("Settings", size="1"),
+                    spacing="1",
+                    align="center",
+                ),
+                href="/settings",
+                color=rx.color("gray", 10),
+                underline="none",
+            ),
+            rx.spacer(),
+            rx.link("Log out", on_click=AppState.log_out, size="1", color=rx.color("gray", 10)),
+            width="100%",
+            align="center",
         ),
         spacing="2",
         width="100%",
@@ -173,7 +119,7 @@ def _account_widget() -> rx.Component:
             on_change=AppState.set_signup_email,
             size="1",
         ),
-        rx.button(
+        button(
             "Sign up",
             on_click=AppState.signup,
             loading=AppState.is_authenticating,
@@ -182,18 +128,18 @@ def _account_widget() -> rx.Component:
         ),
         rx.cond(
             AppState.auth_error != "",
-            rx.text(AppState.auth_error, size="1", color=rx.color("red", 9)),
+            rx.text(AppState.auth_error, size="1", color=rx.color("red", 10)),
         ),
         rx.divider(),
-        rx.text("...or paste an existing key", size="1", color=rx.color("gray", 9)),
+        rx.text("...or paste an existing key", size="1", color=rx.color("gray", 10)),
         rx.input(
             placeholder="rh_...",
             value=AppState.key_input,
             on_change=AppState.set_key_input,
             size="1",
         ),
-        rx.button(
-            "Use key", on_click=AppState.use_existing_key, size="1", width="100%", variant="soft"
+        button(
+            "Use key", tier="secondary", on_click=AppState.use_existing_key, size="1", width="100%"
         ),
         spacing="2",
         width="100%",
@@ -201,8 +147,8 @@ def _account_widget() -> rx.Component:
     return rx.box(
         rx.cond(AppState.is_authenticated, signed_in, signed_out),
         padding="0.75em",
-        border_radius="var(--radius-4)",
-        background=rx.color("gray", 2),
+        border_radius="var(--radius-3)",
+        background="var(--rh-inset)",
         width="100%",
     )
 
@@ -219,7 +165,8 @@ def _sidebar() -> rx.Component:
         *[_nav_link(route, label, icon) for route, label, icon in NAV_ITEMS],
         rx.spacer(),
         _account_widget(),
-        rx.color_mode.button(),
+        rx.color_mode.button(size="1"),
+        class_name="rh-sidebar",
         spacing="2",
         width="240px",
         min_width="240px",

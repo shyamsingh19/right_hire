@@ -7,6 +7,7 @@ import httpx
 import reflex as rx
 
 from right_hire_ui import api_client
+from right_hire_ui.formatting import bucket_tone, shortlist_csv
 from right_hire_ui.states.app_state import AppState
 
 VERDICT_FILTERS = ["All", "Fit", "Maybe", "Reject"]
@@ -172,8 +173,53 @@ class ResultsState(AppState):
     # panel), rather than only the counts for whichever filter was last loaded.
     queue_tab: str = "All"
 
+    # Analytics (histogram + threshold sliders) are secondary to the queue, so they
+    # stay collapsed until asked for.
+    show_calibrate: bool = False
+    # The attach-a-resume form is only relevant once a candidate has been picked for it.
+    show_attach: bool = False
+
     def set_queue_tab(self, value: str) -> None:
         self.queue_tab = value
+
+    def toggle_calibrate(self) -> None:
+        self.show_calibrate = not self.show_calibrate
+
+    def toggle_attach(self) -> None:
+        self.show_attach = not self.show_attach
+
+    # Destructive actions live in ⋯ menus, and a Radix dialog nested inside an open
+    # menu unmounts with it — so the confirm dialogs are controlled by these instead.
+    pending_delete_candidate_id: str = ""
+    confirm_job_action: str = ""  # "" | "candidates" | "job"
+
+    def ask_delete_candidate(self, candidate_id: str) -> None:
+        self.pending_delete_candidate_id = candidate_id
+
+    def cancel_delete_candidate(self) -> None:
+        self.pending_delete_candidate_id = ""
+
+    @rx.var
+    def pending_delete_candidate_name(self) -> str:
+        for r in self.display_rows:
+            if r["candidate_id"] == self.pending_delete_candidate_id:
+                return r["name"]
+        return "This candidate"
+
+    def ask_job_action(self, kind: str) -> None:
+        self.confirm_job_action = kind
+
+    def cancel_job_action(self) -> None:
+        self.confirm_job_action = ""
+
+    def run_job_action(self):
+        kind = self.confirm_job_action
+        self.confirm_job_action = ""
+        if kind == "job":
+            return ResultsState.delete_job(self.selected_job_id)
+        if kind == "candidates":
+            return ResultsState.delete_all_candidates
+        return None
 
     @rx.var
     def inspect_row(self) -> dict:
@@ -209,6 +255,24 @@ class ResultsState(AppState):
     def max_histogram_count(self) -> int:
         buckets = self.histogram
         return max((b.get("count", 0) for b in buckets), default=0)
+
+    @rx.var
+    def histogram_bars(self) -> list[dict]:
+        """Buckets with a bar height and a Fit/Maybe/Reject tone, recomputed from the
+        *draft* sliders so colors track the thresholds as they are dragged."""
+        buckets = self.histogram
+        top = max((b.get("count", 0) for b in buckets), default=0)
+        return [
+            {
+                "bucket": b["bucket"],
+                "count": b.get("count", 0),
+                "height_pct": (b.get("count", 0) / top * 100) if top else 0,
+                "tone": bucket_tone(
+                    b["bucket"], self.draft_fit_threshold, self.draft_maybe_threshold
+                ),
+            }
+            for b in buckets
+        ]
 
     async def load_stats(self):
         if not self.selected_job_id:
@@ -269,14 +333,35 @@ class ResultsState(AppState):
     def has_active(self) -> bool:
         return self.pending_count > 0 or self.processing_count > 0
 
-    def set_selected_job_id(self, value: str) -> None:
+    def set_selected_job_id(self, value: str):
         self.selected_job_id = value
+        self.results = []
+        self.batch_stats = {}
+        self.has_loaded = False
+        return ResultsState.load_results
+
+    async def init_from_query(self):
+        """Pre-selects the job passed as ?job=<id> (how the Create Job and Upload
+        pages hand off) and loads it, so the user lands on results, not a picker."""
+        job_id = self.router.url.query_parameters.get("job", "")
+        if job_id and any(j["id"] == job_id for j in self.jobs):
+            self.selected_job_id = job_id
+        if self.selected_job_id and not self.has_loaded:
+            yield ResultsState.load_results
 
     def set_verdict_filter(self, value: str) -> None:
         self.verdict_filter = value
 
     def set_resume_target_id(self, value: str) -> None:
         self.resume_target_id = value
+        self.show_attach = True
+
+    @rx.var
+    def selected_job_title(self) -> str:
+        for j in self.jobs:
+            if j["id"] == self.selected_job_id:
+                return j["title"]
+        return ""
 
     @rx.var
     def candidate_options(self) -> list[tuple[str, str]]:
@@ -387,25 +472,15 @@ class ResultsState(AppState):
         finally:
             self.is_exporting = False
 
-    async def export_shortlist(self):
-        """Bulk-triage shortcut: exports only Fit-verdict candidates, regardless of
-        whichever queue tab is currently active."""
-        if not self.selected_job_id:
-            return
-        self.is_exporting = True
-        yield
-        try:
-            csv_text = await api_client.export_results_csv(
-                self.api_key, self.selected_job_id, "Fit"
-            )
-            yield rx.download(
-                data=csv_text, filename=f"right_hire_{self.selected_job_id}_shortlist.csv"
-            )
-            yield rx.toast.success("Shortlist exported — Fit candidates only.")
-        except (httpx.HTTPError, api_client.ApiError) as e:
-            yield rx.toast.error(f"Export failed: {e}")
-        finally:
-            self.is_exporting = False
+    def export_shortlist(self):
+        """Bulk-triage shortcut: every Fit and Maybe candidate in the loaded batch,
+        built client-side from the rows already on screen (no extra API round-trip),
+        regardless of which queue tab is active."""
+        rows = [r for r in self.display_rows if r["verdict"] in ("Fit", "Maybe")]
+        if not rows:
+            return rx.toast.info("Nothing to export — no Fit or Maybe candidates yet.")
+        title = (self.selected_job_title or "job").lower().replace(" ", "_")
+        return rx.download(data=shortlist_csv(rows), filename=f"right_hire_{title}_shortlist.csv")
 
     async def delete_candidate(self, candidate_id: str):
         """Permanently removes the candidate and their evaluation — the UI gates this
@@ -423,6 +498,7 @@ class ResultsState(AppState):
             yield rx.toast.error(f"Delete failed: {e}")
         finally:
             self.deleting_candidate_id = ""
+            self.pending_delete_candidate_id = ""
 
     async def delete_all_candidates(self):
         """Wipe every candidate for the selected job, keeping the job (JD, weights,

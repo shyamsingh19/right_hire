@@ -1,4 +1,4 @@
-"""App-wide theme: dark-mode-first Radix theme + custom glassmorphism CSS."""
+"""App-wide theme: light-by-default Radix theme + token CSS (see assets/styles.css)."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ STYLESHEETS = [GOOGLE_FONT_URL, "/styles.css"]
 
 def get_theme() -> rx.Component:
     return rx.theme(
-        appearance="dark",
-        has_background=True,
+        appearance="light",
+        has_background=False,
         accent_color="violet",
-        gray_color="slate",
-        panel_background="translucent",
+        gray_color="sand",
+        panel_background="solid",
         radius="large",
         scaling="100%",
     )

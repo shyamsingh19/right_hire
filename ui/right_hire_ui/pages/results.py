@@ -10,6 +10,7 @@ from right_hire_ui.components.badges import (
     status_badge,
     verdict_pill,
 )
+from right_hire_ui.components.buttons import button
 from right_hire_ui.components.cards import section_card
 from right_hire_ui.components.empty_state import empty_state
 from right_hire_ui.components.job_picker import job_picker
@@ -23,23 +24,19 @@ RESUME_UPLOAD_ID = "candidate_resume_upload"
 
 
 def _queue_tab_button(label: str, count: rx.Var, value: str) -> rx.Component:
+    """Counts are always rendered, zero included — a tab with no number reads as
+    "not loaded" rather than "none in this bucket"."""
     is_active = ResultsState.queue_tab == value
     return rx.button(
-        rx.text(label, size="2", weight="medium"),
-        rx.cond(
-            count > 0,
-            rx.badge(
-                count.to(str),
-                size="1",
-                variant="soft",
-                color_scheme=rx.cond(is_active, "gray", "violet"),
-                radius="full",
-            ),
-        ),
+        rx.text(label + " (" + count.to(str) + ")", size="2", weight="medium"),
         on_click=ResultsState.set_queue_tab(value),
-        variant=rx.cond(is_active, "solid", "soft"),
+        variant="ghost",
         color_scheme=rx.cond(is_active, "violet", "gray"),
         size="2",
+        border_radius="0",
+        padding="0.4em 0.7em",
+        border_bottom="2px solid",
+        border_color=rx.cond(is_active, rx.color("violet", 9), "transparent"),
     )
 
 
@@ -55,7 +52,7 @@ def _queue_tabs() -> rx.Component:
 
 
 def _missing_skill_tag(skill: str) -> rx.Component:
-    return rx.badge(skill, variant="soft", color_scheme="red", size="1")
+    return rx.badge(skill, variant="outline", color_scheme="red", size="1")
 
 
 def _queue_card(row: dict) -> rx.Component:
@@ -83,10 +80,12 @@ def _queue_card(row: dict) -> rx.Component:
             rx.spacer(),
             rx.cond(
                 is_error,
+                # A failed fetch/parse is a processing state, not a verdict — never
+                # let it read as a judgement on the candidate.
                 rx.badge(
-                    rx.icon("triangle-alert", size=12),
-                    "Needs attention",
-                    color_scheme="orange",
+                    rx.spinner(size="1"),
+                    "Processing…",
+                    color_scheme="blue",
                     variant="soft",
                     size="2",
                     radius="full",
@@ -123,15 +122,16 @@ def _queue_card(row: dict) -> rx.Component:
         ),
         rx.divider(),
         _row_actions(row),
+        class_name="rh-row",
         spacing="2",
         align="start",
         width="100%",
         padding="1em 1.25em",
-        border_width="1.5px",
+        border_width="1px",
         border_style="solid",
         border_color=border_color,
         border_radius="var(--radius-3)",
-        background=rx.color("gray", 2),
+        background="var(--rh-card)",
     )
 
 
@@ -139,17 +139,33 @@ def _candidate_queue() -> rx.Component:
     rows = ResultsState.queue_rows
     return rx.vstack(
         rx.hstack(
-            rx.heading(
-                "Candidate queue (" + ResultsState.total_count.to(str) + ")",
-                size="4",
-                weight="bold",
-            ),
-            rx.spacer(),
             _queue_tabs(),
+            rx.spacer(),
+            button(
+                rx.icon("sliders-horizontal", size=14),
+                "Calibrate thresholds",
+                tier="secondary",
+                on_click=ResultsState.toggle_calibrate,
+                size="2",
+            ),
             width="100%",
             align="center",
             wrap="wrap",
             spacing="3",
+            border_bottom=f"1px solid {rx.color('gray', 5)}",
+            padding_bottom="0.25em",
+        ),
+        rx.cond(ResultsState.show_calibrate, _score_distribution_card()),
+        rx.cond(
+            (ResultsState.fit_count == 0) & (ResultsState.total_count > 0),
+            rx.callout(
+                "No candidates meet the Fit threshold ("
+                + ResultsState.draft_fit_threshold.to_string()
+                + "). Review the Maybe bucket, or calibrate the thresholds.",
+                icon="info",
+                color_scheme="blue",
+                size="1",
+            ),
         ),
         rx.cond(
             rows.length() == 0,
@@ -170,28 +186,6 @@ def _candidate_queue() -> rx.Component:
                 size="2",
                 margin_top="0.25em",
             ),
-        ),
-        rx.divider(),
-        rx.hstack(
-            rx.text("Bulk triage:", size="2", weight="medium", color=rx.color("gray", 10)),
-            rx.spacer(),
-            rx.button(
-                rx.icon("download", size=14),
-                "Export CSV",
-                on_click=ResultsState.export_csv,
-                loading=ResultsState.is_exporting,
-                variant="soft",
-                size="2",
-            ),
-            rx.button(
-                rx.icon("list-checks", size=14),
-                "Batch Shortlist",
-                on_click=ResultsState.export_shortlist,
-                loading=ResultsState.is_exporting,
-                size="2",
-            ),
-            width="100%",
-            align="center",
         ),
         spacing="4",
         width="100%",
@@ -254,18 +248,25 @@ def _skill_tag(skill: str) -> rx.Component:
 # ── Score distribution card ──────────────────────────────────────────────────
 
 
-def _histogram_bar(bucket: dict, max_count: rx.Var) -> rx.Component:
-    height_pct = rx.cond(max_count > 0, (bucket["count"].to(int) / max_count) * 100, 0)
+def _histogram_bar(bar: dict) -> rx.Component:
+    tone = bar["tone"].to(str)
+    color = rx.match(
+        tone,
+        ("fit", "var(--rh-fit)"),
+        ("maybe", "var(--rh-maybe)"),
+        ("reject", "var(--rh-reject)"),
+        "var(--rh-processing)",
+    )
     return rx.vstack(
         rx.box(
-            height=f"{height_pct}%",
+            height=bar["height_pct"].to(str) + "%",
             min_height="2px",
             width="100%",
-            background=rx.color("violet", 8),
+            background=color,
             border_radius="2px 2px 0 0",
         ),
-        rx.text(bucket["count"].to(str), size="1", color=rx.color("gray", 10)),
-        rx.text(bucket["bucket"].to(str), size="1", color=rx.color("gray", 9)),
+        rx.text(bar["count"].to(str), size="1", color=rx.color("gray", 11)),
+        rx.text(bar["bucket"].to(str), size="1", color=rx.color("gray", 10)),
         height="140px",
         justify="end",
         align="center",
@@ -274,10 +275,31 @@ def _histogram_bar(bucket: dict, max_count: rx.Var) -> rx.Component:
     )
 
 
+def _threshold_marker(fraction: rx.Var, color: str, label: str) -> rx.Component:
+    """Dashed line over the chart at a threshold, so a bucket the cutoff runs
+    through is readable rather than implied by its bar color."""
+    return rx.box(
+        rx.text(
+            label,
+            size="1",
+            color=color,
+            position="absolute",
+            top="-1.15em",
+            left="0.25em",
+            white_space="nowrap",
+        ),
+        position="absolute",
+        left=(fraction * 100).to_string() + "%",
+        top="0",
+        bottom="0",
+        border_left="1px dashed " + color,
+        pointer_events="none",
+    )
+
+
 def _score_distribution_card() -> rx.Component:
     stats = ResultsState.batch_stats
     histogram = ResultsState.histogram
-    max_count = ResultsState.max_histogram_count
     return rx.cond(
         ResultsState.is_loading_stats,
         rx.center(rx.spinner(), padding="2em"),
@@ -298,11 +320,20 @@ def _score_distribution_card() -> rx.Component:
                     width="100%",
                     align="center",
                 ),
-                rx.hstack(
-                    rx.foreach(histogram, lambda b: _histogram_bar(b, max_count)),
-                    spacing="2",
-                    align="end",
+                rx.box(
+                    rx.hstack(
+                        rx.foreach(ResultsState.histogram_bars, _histogram_bar),
+                        spacing="2",
+                        align="end",
+                        width="100%",
+                    ),
+                    _threshold_marker(
+                        ResultsState.draft_maybe_threshold, "var(--rh-maybe)", "Maybe"
+                    ),
+                    _threshold_marker(ResultsState.draft_fit_threshold, "var(--rh-fit)", "Fit"),
+                    position="relative",
                     width="100%",
+                    padding_top="1.25em",
                 ),
                 rx.divider(),
                 rx.text(
@@ -359,13 +390,13 @@ def _score_distribution_card() -> rx.Component:
                     width="100%",
                     spacing="4",
                 ),
-                rx.button(
-                    rx.icon("sliders-horizontal", size=14),
+                button(
+                    rx.icon("check", size=14),
                     "Apply thresholds",
+                    tier="secondary",
                     on_click=ResultsState.recalibrate_thresholds,
                     loading=ResultsState.is_recalibrating,
                     size="2",
-                    variant="soft",
                     width="fit-content",
                 ),
                 spacing="3",
@@ -481,40 +512,38 @@ def _candidate_inspector_modal() -> rx.Component:
 # ── Result item ───────────────────────────────────────────────────────────────
 
 
-def _delete_candidate_dialog(row: dict) -> rx.Component:
-    """Deleting removes the candidate and their evaluation for good — confirm first."""
-    candidate_id = row["candidate_id"].to(str)
+def _delete_candidate_dialog() -> rx.Component:
+    """One dialog for the whole queue, opened by a card's ⋯ menu (a dialog nested in
+    an open Radix menu unmounts with the menu). Deleting removes the candidate and
+    their evaluation for good — confirm first."""
     return rx.alert_dialog.root(
-        rx.alert_dialog.trigger(
-            rx.button(
-                rx.icon("trash-2", size=12),
-                "Delete",
-                size="1",
-                variant="ghost",
-                color_scheme="red",
-            ),
-        ),
         rx.alert_dialog.content(
             rx.alert_dialog.title("Delete this candidate?"),
             rx.alert_dialog.description(
-                f"{row['name'].to(str)} and their evaluation will be permanently removed. "
-                "This can't be undone.",
+                ResultsState.pending_delete_candidate_name
+                + " and their evaluation will be permanently removed. This can't be undone.",
             ),
             rx.flex(
-                rx.alert_dialog.cancel(rx.button("Cancel", variant="soft", color_scheme="gray")),
-                rx.alert_dialog.action(
-                    rx.button(
-                        "Delete",
-                        color_scheme="red",
-                        on_click=ResultsState.delete_candidate(candidate_id),
-                        loading=ResultsState.deleting_candidate_id == candidate_id,
+                button(
+                    "Cancel",
+                    tier="ghost",
+                    on_click=ResultsState.cancel_delete_candidate,
+                ),
+                rx.button(
+                    "Delete",
+                    color_scheme="red",
+                    on_click=ResultsState.delete_candidate(
+                        ResultsState.pending_delete_candidate_id
                     ),
+                    loading=ResultsState.deleting_candidate_id != "",
                 ),
                 spacing="3",
                 justify="end",
                 margin_top="1em",
             ),
         ),
+        open=ResultsState.pending_delete_candidate_id != "",
+        on_open_change=lambda _open: ResultsState.cancel_delete_candidate(),
     )
 
 
@@ -522,48 +551,63 @@ def _row_actions(row: dict) -> rx.Component:
     is_error = row["is_error"].to(bool)
     candidate_id = row["candidate_id"].to(str)
     return rx.hstack(
+        button(
+            rx.icon("scan-search", size=12),
+            "Inspect",
+            tier="tertiary",
+            size="1",
+            on_click=ResultsState.open_inspector(candidate_id),
+        ),
         rx.cond(
             is_error,
-            rx.button(
+            button(
                 rx.icon("refresh-cw", size=12),
                 "Retry",
+                tier="ghost",
                 size="1",
-                variant="soft",
-                color_scheme="orange",
                 on_click=ResultsState.retry_candidate(candidate_id),
                 loading=ResultsState.retrying_candidate_id == candidate_id,
             ),
         ),
-        rx.cond(
-            is_error,
-            rx.button(
-                rx.icon("file-up", size=12),
-                "Attach Resume PDF",
-                size="1",
-                variant="soft",
-                color_scheme="orange",
-                on_click=ResultsState.set_resume_target_id(candidate_id),
+        rx.spacer(),
+        rx.menu.root(
+            rx.menu.trigger(
+                rx.icon_button(
+                    rx.icon("ellipsis", size=14),
+                    variant="ghost",
+                    color_scheme="gray",
+                    size="1",
+                    aria_label="More actions for " + row["name"].to(str),
+                ),
+            ),
+            rx.menu.content(
+                rx.menu.item(
+                    rx.icon("file-up", size=12),
+                    "Attach resume file…",
+                    on_click=ResultsState.set_resume_target_id(candidate_id),
+                ),
+                rx.menu.separator(),
+                rx.menu.item(
+                    rx.icon("trash-2", size=12),
+                    "Delete candidate",
+                    color="var(--rh-reject)",
+                    on_click=ResultsState.ask_delete_candidate(candidate_id),
+                ),
             ),
         ),
-        rx.button(
-            rx.icon("scan-search", size=12),
-            "Inspect",
-            size="1",
-            variant="soft",
-            on_click=ResultsState.open_inspector(candidate_id),
-        ),
-        rx.spacer(),
-        _delete_candidate_dialog(row),
         width="100%",
         spacing="2",
+        align="center",
     )
 
 
 def _attach_resume_block() -> rx.Component:
     """For candidates whose sheet had no resume_url, or whose link couldn't be fetched —
-    attach the file directly instead. Costs 1 credit, same as a sheet row."""
-    return rx.vstack(
-        rx.text("Attach a resume file", weight="medium", size="2"),
+    attach the file directly instead. Costs 1 credit, same as a sheet row.
+
+    Collapsed by default; a card's ⋯ → "Attach resume file…" opens it with that
+    candidate already selected."""
+    form = rx.vstack(
         rx.text(
             "Uploads the file for one candidate and re-queues them. Accepts .pdf, .txt, .md.",
             size="1",
@@ -598,14 +642,30 @@ def _attach_resume_block() -> rx.Component:
             padding="1.25em",
             width="100%",
         ),
-        rx.button(
+        button(
             "Attach & re-queue",
+            tier="secondary",
             on_click=ResultsState.attach_resume(rx.upload_files(upload_id=RESUME_UPLOAD_ID)),
             loading=ResultsState.is_attaching,
             size="2",
-            variant="soft",
             width="fit-content",
         ),
+        spacing="2",
+        width="100%",
+        padding="1em",
+        border=f"1px solid {rx.color('gray', 5)}",
+        border_radius="var(--radius-3)",
+    )
+    return rx.vstack(
+        button(
+            rx.icon("file-up", size=14),
+            "Attach a resume file",
+            tier="tertiary",
+            on_click=ResultsState.toggle_attach,
+            size="2",
+            width="fit-content",
+        ),
+        rx.cond(ResultsState.show_attach, form),
         spacing="2",
         width="100%",
     )
@@ -614,27 +674,47 @@ def _attach_resume_block() -> rx.Component:
 # ── Page ──────────────────────────────────────────────────────────────────────
 
 
-def _processing_status_banner() -> rx.Component:
-    """Live status bar shown while any candidates are pending or processing.
+def _failure_reason_row(item: dict) -> rx.Component:
+    return rx.hstack(
+        rx.icon("triangle-alert", size=12, color=rx.color("blue", 10)),
+        rx.text(item["label"].to(str), size="1", color=rx.color("gray", 11)),
+        rx.text("×" + item["count"].to(str), size="1", color=rx.color("gray", 11)),
+        spacing="2",
+        align="center",
+    )
 
-    Displays per-status counts, a spinner, and a Cancel button that marks all
-    pending candidates as cancelled (processing ones are mid-flight and unaffected).
+
+def _processing_banner() -> rx.Component:
+    """One banner for everything that isn't a verdict: candidates still queued, and
+    candidates whose processing failed and can be re-queued. Keeps processing state
+    out of the per-candidate score badges, where it read as a candidate judgement.
+
+    Cancel only affects 'pending' candidates — ones a worker already picked up are
+    mid-flight and can't be interrupted.
     """
+    needs = ResultsState.needs_attention_count
     return rx.cond(
-        ResultsState.has_loaded & ResultsState.has_active,
+        ResultsState.has_loaded & (ResultsState.has_active | (needs > 0)),
         rx.hstack(
-            rx.spinner(size="2", color=rx.color("violet", 9)),
+            rx.cond(
+                ResultsState.has_active,
+                rx.spinner(size="2"),
+                rx.icon("refresh-cw", size=18, color=rx.color("blue", 10)),
+            ),
             rx.vstack(
-                rx.text(
-                    "Processing in progress",
-                    size="2",
-                    weight="medium",
+                rx.cond(
+                    needs > 0,
+                    rx.text(
+                        needs.to(str) + " candidates need reprocessing",
+                        size="2",
+                        weight="medium",
+                    ),
+                    rx.text("Processing in progress", size="2", weight="medium"),
                 ),
                 rx.hstack(
                     rx.cond(
                         ResultsState.pending_count > 0,
                         rx.badge(
-                            rx.icon("clock", size=10),
                             ResultsState.pending_count.to(str) + " pending",
                             color_scheme="gray",
                             variant="soft",
@@ -644,55 +724,46 @@ def _processing_status_banner() -> rx.Component:
                     rx.cond(
                         ResultsState.processing_count > 0,
                         rx.badge(
-                            rx.icon("loader", size=10),
                             ResultsState.processing_count.to(str) + " processing",
                             color_scheme="blue",
                             variant="soft",
                             size="1",
                         ),
                     ),
-                    rx.badge(
-                        rx.icon("check", size=10),
-                        ResultsState.done_count.to(str) + " done",
-                        color_scheme="green",
-                        variant="soft",
-                        size="1",
-                    ),
+                    rx.foreach(ResultsState.failure_reason_counts, _failure_reason_row),
                     spacing="2",
                     align="center",
                     flex_wrap="wrap",
                 ),
                 spacing="1",
+                align="start",
             ),
             rx.spacer(),
             rx.cond(
-                ResultsState.needs_attention_count > 0,
-                rx.button(
+                needs > 0,
+                button(
                     rx.icon("refresh-cw", size=14),
-                    "Retry all failed",
+                    "Retry all",
+                    tier="secondary",
                     on_click=ResultsState.retry_all_failed,
                     loading=ResultsState.is_retrying_all,
                     size="2",
-                    variant="soft",
-                    color_scheme="orange",
                 ),
             ),
             rx.cond(
                 ResultsState.pending_count > 0,
-                rx.button(
-                    rx.icon("circle-x", size=14),
+                button(
                     "Cancel pending",
+                    tier="danger",
                     on_click=ResultsState.cancel_pending,
                     loading=ResultsState.is_cancelling,
                     size="2",
-                    variant="soft",
-                    color_scheme="red",
                 ),
             ),
-            padding="1.25em 1.75em",
-            border=f"1px solid {rx.color('violet', 5)}",
+            padding="0.9em 1.25em",
+            border=f"1px solid {rx.color('blue', 6)}",
             border_radius="var(--radius-3)",
-            background=rx.color("violet", 2),
+            background=rx.color("blue", 2),
             width="100%",
             align="center",
             spacing="3",
@@ -700,140 +771,157 @@ def _processing_status_banner() -> rx.Component:
     )
 
 
-def _summary_stat(label: str, value: rx.Var, color_scheme: str) -> rx.Component:
-    return rx.vstack(
-        rx.text(value.to(str), size="6", weight="bold", color=rx.color(color_scheme, 9)),
-        rx.text(label, size="1", color=rx.color("gray", 10)),
-        spacing="0",
-        align="center",
+def _summary_pill(label: str, count: rx.Var, color: str, tab: str = "") -> rx.Component:
+    """Compact rollup that doubles as a filter shortcut — the old five-number stats
+    block sat above the queue and pushed the actual work off-screen."""
+    pill = rx.badge(
+        count.to(str) + " " + label,
+        variant="soft",
+        color_scheme=color,
+        size="2",
+        radius="full",
+    )
+    if not tab:
+        return pill
+    return rx.box(
+        pill,
+        on_click=ResultsState.set_queue_tab(tab),
+        cursor="pointer",
+        role="button",
+        aria_label="Filter to " + label,
     )
 
 
-def _failure_reason_row(item: dict) -> rx.Component:
+def _summary_pills() -> rx.Component:
+    in_flight = (
+        ResultsState.pending_count
+        + ResultsState.processing_count
+        + ResultsState.needs_attention_count
+    )
     return rx.hstack(
-        rx.icon("triangle-alert", size=12, color=rx.color("orange", 9)),
-        rx.text(item["label"].to(str), size="2"),
+        _summary_pill("Fit", ResultsState.fit_count, "green", "Fit"),
+        _summary_pill("Maybe", ResultsState.maybe_count, "amber", "Maybe"),
+        _summary_pill("Reject", ResultsState.reject_count, "red", "Reject"),
+        rx.cond(in_flight > 0, _summary_pill("Processing", in_flight, "blue")),
+        spacing="2",
+        align="center",
+        wrap="wrap",
+    )
+
+
+def _job_action_dialog() -> rx.Component:
+    """Shared confirm for both destructive job actions, opened from the ⋯ menu.
+    Deleting all candidates keeps the JD/weights/thresholds so a fresh batch can be
+    uploaded; deleting the job takes everything."""
+    is_job = ResultsState.confirm_job_action == "job"
+    return rx.alert_dialog.root(
+        rx.alert_dialog.content(
+            rx.alert_dialog.title(
+                rx.cond(is_job, "Delete this job?", "Delete all candidates for this job?")
+            ),
+            rx.alert_dialog.description(
+                rx.cond(
+                    is_job,
+                    "All candidates and evaluation results for this job will be permanently "
+                    "deleted. This cannot be undone.",
+                    "All candidates and their evaluation results will be permanently deleted. "
+                    "The job itself (description, weights, thresholds) is kept, so you can "
+                    "upload a fresh batch afterward. This cannot be undone.",
+                ),
+            ),
+            rx.flex(
+                button("Cancel", tier="ghost", on_click=ResultsState.cancel_job_action),
+                rx.button(
+                    rx.cond(is_job, "Delete job", "Delete all candidates"),
+                    color_scheme="red",
+                    on_click=ResultsState.run_job_action,
+                    loading=ResultsState.is_deleting_job | ResultsState.is_deleting_all,
+                ),
+                spacing="3",
+                justify="end",
+                margin_top="1em",
+            ),
+        ),
+        open=ResultsState.confirm_job_action != "",
+        on_open_change=lambda _open: ResultsState.cancel_job_action(),
+    )
+
+
+def _top_bar() -> rx.Component:
+    return rx.hstack(
+        rx.box(
+            job_picker(
+                ResultsState.job_options,
+                ResultsState.selected_job_id,
+                ResultsState.set_selected_job_id,
+            ),
+            flex="1",
+            min_width="200px",
+        ),
+        rx.cond(ResultsState.has_loaded, _summary_pills()),
         rx.spacer(),
-        rx.badge(item["count"].to(str), variant="soft", color_scheme="orange", size="1"),
+        button(
+            rx.icon("download", size=14),
+            "Export shortlist",
+            on_click=ResultsState.export_shortlist,
+            disabled=ResultsState.selected_job_id == "",
+            size="2",
+        ),
+        rx.tooltip(
+            rx.icon_button(
+                rx.icon("refresh-cw", size=14),
+                variant="outline",
+                color_scheme="violet",
+                size="2",
+                on_click=ResultsState.load_results,
+                loading=ResultsState.is_loading,
+                disabled=ResultsState.selected_job_id == "",
+                aria_label="Reload results",
+            ),
+            content="Reload results",
+        ),
+        rx.menu.root(
+            rx.menu.trigger(
+                rx.icon_button(
+                    rx.icon("ellipsis", size=16),
+                    variant="ghost",
+                    color_scheme="gray",
+                    size="2",
+                    aria_label="Job actions",
+                ),
+            ),
+            rx.menu.content(
+                rx.menu.item(
+                    rx.icon("download", size=12),
+                    "Export all (CSV)",
+                    on_click=ResultsState.export_csv,
+                ),
+                rx.menu.separator(),
+                rx.menu.item(
+                    rx.icon("trash", size=12),
+                    "Delete all candidates",
+                    color="var(--rh-reject)",
+                    on_click=ResultsState.ask_job_action("candidates"),
+                ),
+                rx.menu.item(
+                    rx.icon("trash-2", size=12),
+                    "Delete job",
+                    color="var(--rh-reject)",
+                    on_click=ResultsState.ask_job_action("job"),
+                ),
+            ),
+        ),
         width="100%",
         align="center",
-    )
-
-
-def _results_summary_panel() -> rx.Component:
-    """Batch-level rollup shown once results are loaded: verdict counts plus a
-    breakdown of *why* any candidates need attention, so the cause of a failed
-    batch (private Drive links, LLM outage, etc.) is visible at a glance."""
-    return rx.cond(
-        ResultsState.has_loaded & (ResultsState.total_count > 0),
-        rx.vstack(
-            rx.hstack(
-                _summary_stat("Total", ResultsState.total_count, "gray"),
-                _summary_stat("Fit", ResultsState.fit_count, "green"),
-                _summary_stat("Maybe", ResultsState.maybe_count, "amber"),
-                _summary_stat("Reject", ResultsState.reject_count, "red"),
-                _summary_stat("Needs attention", ResultsState.needs_attention_count, "orange"),
-                spacing="6",
-                width="100%",
-                justify="center",
-            ),
-            rx.cond(
-                ResultsState.failure_reason_counts.length() > 0,
-                rx.vstack(
-                    rx.divider(),
-                    rx.text("Why candidates need attention", weight="medium", size="2"),
-                    rx.foreach(ResultsState.failure_reason_counts, _failure_reason_row),
-                    spacing="2",
-                    width="100%",
-                    align="start",
-                ),
-            ),
-            padding="1em",
-            border=f"1px solid {rx.color('gray', 5)}",
-            border_radius="var(--radius-3)",
-            width="100%",
-            spacing="3",
-        ),
-    )
-
-
-def _delete_job_dialog() -> rx.Component:
-    """Confirm before deleting a job and all its data — this is irreversible."""
-    return rx.alert_dialog.root(
-        rx.alert_dialog.trigger(
-            rx.button(
-                rx.icon("trash-2", size=14),
-                "Delete job",
-                disabled=ResultsState.selected_job_id == "",
-                size="3",
-                variant="soft",
-                color_scheme="red",
-            ),
-        ),
-        rx.alert_dialog.content(
-            rx.alert_dialog.title("Delete this job?"),
-            rx.alert_dialog.description(
-                "All candidates and evaluation results for this job will be permanently deleted. "
-                "This cannot be undone.",
-            ),
-            rx.flex(
-                rx.alert_dialog.cancel(rx.button("Cancel", variant="soft", color_scheme="gray")),
-                rx.alert_dialog.action(
-                    rx.button(
-                        "Delete job",
-                        color_scheme="red",
-                        on_click=ResultsState.delete_job(ResultsState.selected_job_id),
-                        loading=ResultsState.is_deleting_job,
-                    ),
-                ),
-                spacing="3",
-                justify="end",
-                margin_top="1em",
-            ),
-        ),
-    )
-
-
-def _delete_all_candidates_dialog() -> rx.Component:
-    """Confirm before wiping every candidate for the current job. Unlike deleting the
-    job itself, this keeps the JD/weights/thresholds so a fresh batch can be uploaded."""
-    return rx.alert_dialog.root(
-        rx.alert_dialog.trigger(
-            rx.button(
-                rx.icon("trash", size=14),
-                "Delete all candidates",
-                disabled=ResultsState.selected_job_id == "",
-                size="3",
-                variant="soft",
-                color_scheme="red",
-            ),
-        ),
-        rx.alert_dialog.content(
-            rx.alert_dialog.title("Delete all candidates for this job?"),
-            rx.alert_dialog.description(
-                "All candidates and their evaluation results for this job will be permanently "
-                "deleted. The job itself (description, weights, thresholds) is kept, so you can "
-                "upload a fresh batch afterward. This cannot be undone.",
-            ),
-            rx.flex(
-                rx.alert_dialog.cancel(rx.button("Cancel", variant="soft", color_scheme="gray")),
-                rx.alert_dialog.action(
-                    rx.button(
-                        "Delete all candidates",
-                        color_scheme="red",
-                        on_click=ResultsState.delete_all_candidates,
-                        loading=ResultsState.is_deleting_all,
-                    ),
-                ),
-                spacing="3",
-                justify="end",
-                margin_top="1em",
-            ),
-        ),
+        spacing="3",
+        wrap="wrap",
     )
 
 
 def results_page() -> rx.Component:
+    """Work queue first, analytics second: the top bar answers "how does this batch
+    look", the queue answers "who do I interview", and the histogram/sliders stay
+    behind "Calibrate thresholds"."""
     return page_shell(
         section_card(
             "Evaluation Results",
@@ -842,36 +930,16 @@ def results_page() -> rx.Component:
                 rx.center(rx.spinner(size="3"), padding="2em"),
                 rx.cond(
                     ResultsState.jobs.length() == 0,
-                    empty_state("No jobs found. Create one on the 'Create Job' page first."),
+                    empty_state(
+                        "No jobs yet",
+                        "Create a job with screening criteria to start evaluating candidates.",
+                        icon="file-plus",
+                        cta_label="Create a Job →",
+                        cta_href="/",
+                    ),
                     rx.vstack(
-                        rx.hstack(
-                            rx.box(
-                                job_picker(
-                                    ResultsState.job_options,
-                                    ResultsState.selected_job_id,
-                                    ResultsState.set_selected_job_id,
-                                ),
-                                flex="1",
-                                min_width="0",
-                            ),
-                            width="100%",
-                            spacing="3",
-                        ),
-                        rx.hstack(
-                            rx.button(
-                                "Load Results",
-                                on_click=ResultsState.load_results,
-                                loading=ResultsState.is_loading,
-                                size="3",
-                            ),
-                            _delete_all_candidates_dialog(),
-                            _delete_job_dialog(),
-                            spacing="3",
-                            width="fit-content",
-                        ),
-                        _processing_status_banner(),
-                        _results_summary_panel(),
-                        rx.cond(ResultsState.has_loaded, _score_distribution_card()),
+                        _top_bar(),
+                        _processing_banner(),
                         rx.cond(
                             ResultsState.load_error != "",
                             rx.callout(
@@ -879,12 +947,31 @@ def results_page() -> rx.Component:
                             ),
                         ),
                         rx.cond(
-                            ResultsState.has_loaded & (ResultsState.display_rows.length() == 0),
-                            empty_state("No results found.", icon="search-x"),
-                            rx.fragment(
-                                _candidate_queue(),
-                                rx.divider(margin_y="1em"),
-                                _attach_resume_block(),
+                            ResultsState.selected_job_id == "",
+                            empty_state(
+                                "Select a job",
+                                "Pick a job above to see its candidate queue.",
+                                icon="list-checks",
+                            ),
+                            rx.cond(
+                                ResultsState.is_loading & ~ResultsState.has_loaded,
+                                rx.center(rx.spinner(size="3"), padding="2em"),
+                                rx.cond(
+                                    ResultsState.total_count == 0,
+                                    empty_state(
+                                        "No candidates uploaded",
+                                        "Upload a spreadsheet of candidates to evaluate them "
+                                        "against this job's criteria.",
+                                        icon="upload",
+                                        cta_label="Upload Candidates →",
+                                        cta_href="/upload?job=" + ResultsState.selected_job_id,
+                                    ),
+                                    rx.fragment(
+                                        _candidate_queue(),
+                                        rx.divider(margin_y="1em"),
+                                        _attach_resume_block(),
+                                    ),
+                                ),
                             ),
                         ),
                         width="100%",
@@ -894,4 +981,6 @@ def results_page() -> rx.Component:
             ),
         ),
         _candidate_inspector_modal(),
+        _delete_candidate_dialog(),
+        _job_action_dialog(),
     )

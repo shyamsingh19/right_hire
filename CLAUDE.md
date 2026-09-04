@@ -42,6 +42,7 @@ GET /jobs/{id}/results
 - **Async vs Sync Boundary:** FastAPI endpoints use `async` SQLAlchemy sessions (`get_db`). RQ tasks in `workers/tasks.py` use **synchronous** engines (`create_engine`).
 - **Scoring Breakdown:** Score = Composite (`0.30` Skill Overlap + `0.20` Cosine Sim + `0.50` LLM Judge). Never collapse score to pure semantic cosine similarity.
 - **Normalization:** Interpret scores relative to batch distribution, not absolute numbers.
+- **UI conventions:** Light theme by default (dark via the sidebar toggle); colors come from `--rh-*` tokens or `rx.color()`, never hardcoded hex in components. One filled primary button per screen — use `components/buttons.button(tier=...)`; destructive actions go in a `⋯` menu behind a confirm dialog. Job dropdowns show titles only, never UUIDs; pages hand off state via `?job=<id>`.
 - **Cache Key:** `Evaluation.cache_key = sha256(resume_text + json(jd_parsed) + json(weights) + json(thresholds))`.
 - **Delete Constraint:** No DB cascade delete. Deleting a candidate requires deleting its `Evaluation` row first.
 - **Stale-Candidate Watchdog:** RQ's `Retry(max=3)` on `process_candidate` only covers in-process exceptions, not a dead/crashed worker — a candidate can otherwise stay `pending`/`processing` forever. Any worker with `--with-scheduler` self-schedules a recurring sweep (`ensure_stale_sweep_scheduled`, via RQ's native `Repeat`) the first time it handles a job — no cron, no bootstrap step, works under any deploy shape. Every `stale_sweep_interval_minutes` (default 15) it requeues candidates whose `updated_at` is older than `stale_candidate_timeout_minutes` (default 60), then fails them with an error after `stale_candidate_max_retries` (default 3).
@@ -63,6 +64,9 @@ app/
 ├── schemas.py        # Pydantic v2 schemas (ParsedResume, ParsedJD, JudgeOutput)
 ├── prompts/          # Templates with {{PLACEHOLDER}} substitution (judge.txt <= 300 tokens)
 └── ui/               # Reflex frontend (reads API_BASE or config.ini [ui] api_base)
+    ├── pages/        # /, /upload, /results, /settings
+    ├── components/   # buttons.py = button tiers; assets/styles.css = --rh-* design tokens
+    └── formatting.py # pure display helpers (self-check: `python ui/right_hire_ui/formatting.py`)
 ```
 
 ---
