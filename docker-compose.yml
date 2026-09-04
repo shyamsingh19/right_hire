@@ -12,7 +12,7 @@ services:
     volumes:
       - .:/app
       - storage_data:/app/storage
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   worker:
     build: .
@@ -21,8 +21,11 @@ services:
     volumes:
       - .:/app
       - storage_data:/app/storage
+    # alembic upgrade head here too, not just in `app` — both containers start together
+    # with no ordering guarantee, and this is what runs the pipeline that just broke
+    # (schema drift) if only one of the two ever migrated.
     command: >
-      sh -c "rq worker --with-scheduler --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats"
+      sh -c "alembic upgrade head && rq worker --with-scheduler --url $$(python -c 'from app.config import settings; print(settings.effective_redis_url)') ats"
 
 volumes:
   storage_data:
