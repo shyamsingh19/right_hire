@@ -222,6 +222,13 @@ class ResultsState(AppState):
             ]
 
     @rx.var
+    def any_dialog_open(self) -> bool:
+        """Drives the page shell's `inert` background — see layout.page_shell."""
+        return bool(
+            self.pending_delete_candidate_id or self.confirm_job_action or self.inspect_candidate_id
+        )
+
+    @rx.var
     def selected_count(self) -> int:
         return len(self.selected_ids)
 
@@ -456,8 +463,17 @@ class ResultsState(AppState):
         """Pre-selects the job passed as ?job=<id> (how the Create Job and Upload
         pages hand off) and loads it, so the user lands on results, not a picker."""
         job_id = self.router.url.query_parameters.get("job", "")
-        if job_id and any(j["id"] == job_id for j in self.jobs):
-            self.selected_job_id = job_id
+        if job_id:
+            # The URL wins: an unknown or malformed id clears whatever was selected
+            # rather than silently showing a different job than the link asked for.
+            # (Reflex state survives client-side navigation, so without this a stale
+            # selection would persist behind a bad ?job=.)
+            known = any(j["id"] == job_id for j in self.jobs)
+            self.selected_job_id = job_id if known else ""
+            if not known:
+                self.results = []
+                self.has_loaded = False
+                self.batch_stats = {}
         if self.selected_job_id and not self.has_loaded:
             yield ResultsState.load_results
 

@@ -100,11 +100,11 @@ def _account_widget() -> rx.Component:
                     align="center",
                 ),
                 href="/settings",
-                color=rx.color("gray", 10),
+                color=rx.color("gray", 11),
                 underline="none",
             ),
             rx.spacer(),
-            rx.link("Log out", on_click=AppState.log_out, size="1", color=rx.color("gray", 10)),
+            rx.link("Log out", on_click=AppState.log_out, size="1", color=rx.color("gray", 11)),
             width="100%",
             align="center",
         ),
@@ -131,7 +131,7 @@ def _account_widget() -> rx.Component:
             rx.text(AppState.auth_error, size="1", color=rx.color("red", 10)),
         ),
         rx.divider(),
-        rx.text("...or paste an existing key", size="1", color=rx.color("gray", 10)),
+        rx.text("...or paste an existing key", size="1", color=rx.color("gray", 11)),
         rx.input(
             placeholder="rh_...",
             value=AppState.key_input,
@@ -178,15 +178,30 @@ def _sidebar() -> rx.Component:
     )
 
 
-def page_shell(*children) -> rx.Component:
-    return rx.hstack(
-        _sidebar(),
-        rx.box(
-            rx.vstack(*children, spacing="5", width="100%", max_width="960px", margin="0 auto"),
-            padding="2.5em 2em",
+def page_shell(*children, overlays=None, overlay_open=None) -> rx.Component:
+    """Sidebar + centered content.
+
+    `overlays` (dialogs, popovers) render OUTSIDE the main content, because when
+    `overlay_open` is true the content and sidebar are marked `inert`. Reflex's Radix
+    wrapper exposes no `modal`/portal prop, so a controlled dialog mounts without a
+    focus scope — Tab walks the page behind it. `inert` is the native fix: the browser
+    removes the background from the tab order and from hit-testing, which is what the
+    missing focus trap was supposed to do. It only works if the dialog itself is not
+    inside the inert subtree, hence the separate slot.
+    """
+    inert = {} if overlay_open is None else {"custom_attrs": {"inert": overlay_open}}
+    return rx.fragment(
+        rx.hstack(
+            _sidebar(),
+            rx.box(
+                rx.vstack(*children, spacing="5", width="100%", max_width="960px", margin="0 auto"),
+                padding="2.5em 2em",
+                width="100%",
+            ),
+            spacing="0",
             width="100%",
+            align_items="flex-start",
+            **inert,
         ),
-        spacing="0",
-        width="100%",
-        align_items="flex-start",
+        *(overlays or []),
     )

@@ -127,12 +127,12 @@ def _queue_card(row: dict) -> rx.Component:
         rx.text(
             row["email"].to(str) + " • " + row["yoe"].to(str) + " yrs • " + row["location"].to(str),
             size="2",
-            color=rx.color("gray", 10),
+            color=rx.color("gray", 11),
         ),
         rx.cond(
             missing_skills.length() > 0,
             rx.hstack(
-                rx.text("Missing:", size="1", color=rx.color("gray", 10)),
+                rx.text("Missing:", size="1", color=rx.color("gray", 11)),
                 rx.foreach(missing_skills, _missing_skill_tag),
                 wrap="wrap",
                 gap="1",
@@ -227,7 +227,7 @@ def _breakdown_row(row: dict) -> rx.Component:
     return rx.table.row(
         rx.table.cell(row["signal"].to(str), font_weight="500"),
         rx.table.cell(row["raw"].to(str), text_align="center"),
-        rx.table.cell(row["weight"].to(str), text_align="center", color=rx.color("gray", 10)),
+        rx.table.cell(row["weight"].to(str), text_align="center", color=rx.color("gray", 11)),
         rx.table.cell(
             rx.badge(row["contribution"].to(str), variant="soft", color_scheme="violet", size="1"),
             text_align="center",
@@ -294,7 +294,7 @@ def _histogram_bar(bar: dict) -> rx.Component:
             border_radius="2px 2px 0 0",
         ),
         rx.text(bar["count"].to(str), size="1", color=rx.color("gray", 11)),
-        rx.text(bar["bucket"].to(str), size="1", color=rx.color("gray", 10)),
+        rx.text(bar["bucket"].to(str), size="1", color=rx.color("gray", 11)),
         height="140px",
         justify="end",
         align="center",
@@ -343,7 +343,7 @@ def _score_distribution_card() -> rx.Component:
                         + stats["total_candidates"].to(str)
                         + " candidates",
                         size="1",
-                        color=rx.color("gray", 10),
+                        color=rx.color("gray", 11),
                     ),
                     width="100%",
                     align="center",
@@ -356,9 +356,11 @@ def _score_distribution_card() -> rx.Component:
                         width="100%",
                     ),
                     _threshold_marker(
-                        ResultsState.draft_maybe_threshold, "var(--rh-maybe)", "Maybe"
+                        ResultsState.draft_maybe_threshold, "var(--rh-maybe-text)", "Maybe"
                     ),
-                    _threshold_marker(ResultsState.draft_fit_threshold, "var(--rh-fit)", "Fit"),
+                    _threshold_marker(
+                        ResultsState.draft_fit_threshold, "var(--rh-fit-text)", "Fit"
+                    ),
                     position="relative",
                     width="100%",
                     padding_top="1.25em",
@@ -388,6 +390,7 @@ def _score_distribution_card() -> rx.Component:
                             max=1,
                             step=0.05,
                             width="100%",
+                            aria_label="Fit threshold",
                         ),
                         width="100%",
                         spacing="1",
@@ -410,6 +413,7 @@ def _score_distribution_card() -> rx.Component:
                             max=1,
                             step=0.05,
                             width="100%",
+                            aria_label="Maybe threshold",
                         ),
                         width="100%",
                         spacing="1",
@@ -556,6 +560,7 @@ def _delete_candidate_dialog() -> rx.Component:
                     "Cancel",
                     tier="ghost",
                     on_click=ResultsState.cancel_delete_candidate,
+                    auto_focus=True,
                 ),
                 rx.button(
                     "Delete",
@@ -618,7 +623,7 @@ def _row_actions(row: dict) -> rx.Component:
                 rx.menu.item(
                     rx.icon("trash-2", size=12),
                     "Delete candidate",
-                    color="var(--rh-reject)",
+                    color="var(--rh-reject-text)",
                     on_click=ResultsState.ask_delete_candidate(candidate_id),
                 ),
             ),
@@ -733,7 +738,9 @@ def _processing_banner() -> rx.Component:
                 rx.cond(
                     needs > 0,
                     rx.text(
-                        needs.to(str) + " candidates need reprocessing",
+                        needs.to(str)
+                        + rx.cond(needs == 1, " candidate needs ", " candidates need ")
+                        + "reprocessing",
                         size="2",
                         weight="medium",
                     ),
@@ -936,7 +943,14 @@ def _job_action_dialog() -> rx.Component:
                 ),
             ),
             rx.flex(
-                button("Cancel", tier="ghost", on_click=ResultsState.cancel_job_action),
+                button(
+                    "Cancel",
+                    tier="ghost",
+                    on_click=ResultsState.cancel_job_action,
+                    # Claims focus for the dialog: it is opened from a ⋯ menu, and the
+                    # menu's own focus-restore fires after the dialog mounts.
+                    auto_focus=True,
+                ),
                 rx.button(
                     rx.cond(
                         is_selected,
@@ -1010,13 +1024,13 @@ def _top_bar() -> rx.Component:
                 rx.menu.item(
                     rx.icon("trash", size=12),
                     "Delete all candidates",
-                    color="var(--rh-reject)",
+                    color="var(--rh-reject-text)",
                     on_click=ResultsState.ask_job_action("candidates"),
                 ),
                 rx.menu.item(
                     rx.icon("trash-2", size=12),
                     "Delete job",
-                    color="var(--rh-reject)",
+                    color="var(--rh-reject-text)",
                     on_click=ResultsState.ask_job_action("job"),
                 ),
             ),
@@ -1090,8 +1104,11 @@ def results_page() -> rx.Component:
                 ),
             ),
         ),
-        _candidate_inspector_modal(),
-        _delete_candidate_dialog(),
-        _job_action_dialog(),
         _bulk_action_bar(),
+        overlays=[
+            _candidate_inspector_modal(),
+            _delete_candidate_dialog(),
+            _job_action_dialog(),
+        ],
+        overlay_open=ResultsState.any_dialog_open,
     )

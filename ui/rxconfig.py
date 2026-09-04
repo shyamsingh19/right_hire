@@ -27,9 +27,19 @@ _cors_allowed_origins = (
     ["*"] if _cors_env.strip() == "*" else [o.strip() for o in _cors_env.split(",") if o.strip()]
 )
 
+# Ports are pinned with env overrides rather than left to Reflex's defaults. Reflex
+# silently increments past a busy port (:8000 -> :8002 ...), which makes the websocket
+# URL differ between runs and between machines; a fresh clone should be deterministic.
+# Kept env-driven, not hardcoded, because Render/Railway inject the port at runtime
+# (see render.yaml's --backend-port $PORT).
+_frontend_port = int(os.getenv("REFLEX_FRONTEND_PORT", "3000"))
+_backend_port = int(os.getenv("REFLEX_BACKEND_PORT", "8000"))
+
 config = rx.Config(
     app_name="right_hire_ui",
     **({"api_url": _api_url} if _api_url else {}),
+    frontend_port=_frontend_port,
+    backend_port=_backend_port,
     cors_allowed_origins=_cors_allowed_origins,
     show_built_with_reflex=False,
 )

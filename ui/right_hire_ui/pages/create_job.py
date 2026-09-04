@@ -65,7 +65,7 @@ def _step_dot(number: int, label: str) -> rx.Component:
                     str(number),
                     size="2",
                     weight="bold",
-                    color=rx.cond(is_current, rx.color("violet", 1), rx.color("gray", 10)),
+                    color=rx.cond(is_current, rx.color("violet", 1), rx.color("gray", 11)),
                 ),
             ),
             width="28px",
@@ -80,7 +80,7 @@ def _step_dot(number: int, label: str) -> rx.Component:
             label,
             size="2",
             weight=rx.cond(is_current, "bold", "regular"),
-            color=rx.cond(is_current, rx.color("violet", 11), rx.color("gray", 10)),
+            color=rx.cond(is_current, rx.color("violet", 11), rx.color("gray", 11)),
             white_space="nowrap",
         ),
         spacing="2",
@@ -159,7 +159,6 @@ def _step_1() -> rx.Component:
                     value=CreateJobState.jd_raw,
                     on_change=CreateJobState.set_jd_raw,
                     read_only=parsing,
-                    min_height="300px",
                     width="100%",
                 ),
                 rx.cond(
@@ -167,7 +166,7 @@ def _step_1() -> rx.Component:
                     rx.text(
                         CreateJobState.jd_char_count,
                         size="1",
-                        color=rx.color("gray", 10),
+                        color=rx.color("gray", 11),
                         position="absolute",
                         bottom="0.6em",
                         right="0.9em",
@@ -178,7 +177,7 @@ def _step_1() -> rx.Component:
                 ),
                 # .rh-parsing pulses the border while the LLM call is in flight and
                 # falls back to a static accent border under prefers-reduced-motion.
-                class_name=rx.cond(parsing, "rh-parsing", ""),
+                class_name=rx.cond(parsing, "rh-jd rh-parsing", "rh-jd"),
                 position="relative",
                 width="100%",
                 border_radius="var(--radius-3)",
@@ -286,7 +285,7 @@ def _criteria_editor() -> rx.Component:
                 spacing="2",
                 width="100%",
             ),
-            rx.text("No criteria yet — add one below.", size="2", color=rx.color("gray", 10)),
+            rx.text("No criteria yet — add one below.", size="2", color=rx.color("gray", 11)),
         ),
         button(
             rx.icon("plus", size=14),
@@ -442,7 +441,7 @@ def _step_2() -> rx.Component:
 
 def _summary_item(label: str, value) -> rx.Component:
     return rx.vstack(
-        rx.text(label, size="1", color=rx.color("gray", 10), weight="medium"),
+        rx.text(label, size="1", color=rx.color("gray", 11), weight="medium"),
         rx.text(value, size="3", weight="medium"),
         spacing="1",
         align="start",
@@ -479,7 +478,7 @@ def _created_job_panel() -> rx.Component:
                         rx.text(
                             "Required skills",
                             size="1",
-                            color=rx.color("gray", 10),
+                            color=rx.color("gray", 11),
                             weight="medium",
                         ),
                         rx.flex(
@@ -502,7 +501,7 @@ def _created_job_panel() -> rx.Component:
                         rx.text(
                             "Must-haves",
                             size="1",
-                            color=rx.color("gray", 10),
+                            color=rx.color("gray", 11),
                             weight="medium",
                         ),
                         rx.flex(

@@ -54,8 +54,9 @@ class UploadState(AppState):
         """Pre-selects the job passed as ?job=<id> — how Create Job hands off after
         activating a job, so the dropdown is already right."""
         job_id = self.router.url.query_parameters.get("job", "")
-        if job_id and any(j["id"] == job_id for j in self.jobs):
-            self.selected_job_id = job_id
+        if job_id:
+            # URL is authoritative — see the same note in ResultsState.init_from_query.
+            self.selected_job_id = job_id if any(j["id"] == job_id for j in self.jobs) else ""
 
     @rx.var
     def selected_job_title(self) -> str:

@@ -14,6 +14,14 @@
   --rh-maybe: #b8862b;
   --rh-reject: #c43e3e;
   --rh-processing: #4a7fb5;
+  /* Text-safe variants. The fill colors above are chosen for area (bars, borders)
+     and only clear WCAG AA as text on pure white — not on --rh-inset, which is the
+     surface a hovered row or menu item actually uses. Measured against both:
+     these clear 5:1 everywhere, the fills drop to 2.7-4.3. */
+  --rh-fit-text: #24704a;
+  --rh-maybe-text: #7a5410;
+  --rh-reject-text: #a83232;
+  --rh-processing-text: #3a6690;
   /* Brand accent drives every solid/soft Radix accent surface. */
   --accent-9: #6b4c9a;
   --accent-10: #5b3f83;
@@ -35,6 +43,12 @@
   --rh-maybe: #d4a94e;
   --rh-reject: #e86b6b;
   --rh-processing: #6ba3d6;
+  /* Dark mode: the fills are already light enough to pass as text on the dark
+     surfaces, so the text variants simply track them. */
+  --rh-fit-text: #4caf7a;
+  --rh-maybe-text: #d4a94e;
+  --rh-reject-text: #e86b6b;
+  --rh-processing-text: #6ba3d6;
   --accent-9: #9b7fca;
   --accent-10: #8a6bbd;
   --accent-11: #b9a3dd;
@@ -130,4 +144,29 @@ body {
   .rh-select {
     transition: none;
   }
+}
+
+/* Radix's checkbox leaves :focus-visible unpainted inside our card, so the bulk-select
+   boxes were keyboard-reachable with no visible ring. Measured, not assumed: a Tab
+   walk of /results found these three controls (select-all + per-card) as the only
+   focusable elements without one. */
+.rh-select button:focus-visible,
+.rh-row button[role="checkbox"]:focus-visible,
+button[role="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent-9);
+  outline-offset: 2px;
+}
+
+/* Radix slider thumbs match :focus-visible but paint nothing, so the threshold
+   sliders were keyboard-operable with no visible focus indicator. Verified by a Tab
+   walk of /results: these were the last two focusable elements without a ring. */
+[role="slider"]:focus-visible {
+  outline: 2px solid var(--accent-9);
+  outline-offset: 2px;
+}
+
+/* The JD field's 300px minimum belongs on the inner <textarea>: Radix wraps it, so a
+   min-height on the wrapper left the actual typing area at 298px. */
+.rh-jd textarea {
+  min-height: 300px;
 }

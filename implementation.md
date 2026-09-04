@@ -150,7 +150,7 @@ ollama pull bge-m3            # embeddings
 docker compose up -d          # mysql + redis
 make migrate                  # alembic upgrade head
 make seed                     # load demo Excel + JD
-make run                      # FastAPI on :8000
+make run                      # FastAPI on :8001
 make worker                   # RQ worker (separate terminal)
 streamlit run ui/app.py       # optional UI on :8501
 ```
