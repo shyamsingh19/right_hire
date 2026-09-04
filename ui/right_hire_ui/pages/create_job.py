@@ -5,7 +5,7 @@ import reflex as rx
 from right_hire_ui.components.buttons import button
 from right_hire_ui.components.cards import section_card
 from right_hire_ui.components.layout import page_shell
-from right_hire_ui.states.create_job_state import CreateJobState
+from right_hire_ui.states.create_job_state import CRITERION_LEVELS, CreateJobState
 
 
 def _threshold_slider(label: str, value, on_change) -> rx.Component:
@@ -52,33 +52,86 @@ def _weight_slider(label: str, value, on_change) -> rx.Component:
     )
 
 
-def _step_indicator() -> rx.Component:
-    return rx.hstack(
-        rx.badge(
-            "1. Job Description",
-            variant=rx.cond(CreateJobState.step == 1, "solid", "soft"),
-            color_scheme="violet",
-            size="2",
+def _step_dot(number: int, label: str) -> rx.Component:
+    """Filled = current, filled-with-check = done, outlined = still ahead."""
+    is_current = CreateJobState.step == number
+    is_done = CreateJobState.step > number
+    return rx.vstack(
+        rx.center(
+            rx.cond(
+                is_done,
+                rx.icon("check", size=14, color=rx.color("violet", 1)),
+                rx.text(
+                    str(number),
+                    size="2",
+                    weight="bold",
+                    color=rx.cond(is_current, rx.color("violet", 1), rx.color("gray", 10)),
+                ),
+            ),
+            width="28px",
+            height="28px",
+            border_radius="50%",
+            border="1px solid",
+            border_color=rx.cond(is_current | is_done, rx.color("violet", 9), rx.color("gray", 7)),
+            background=rx.cond(is_current | is_done, rx.color("violet", 9), "transparent"),
+            flex_shrink="0",
         ),
-        rx.icon("chevron-right", size=14, color=rx.color("gray", 9)),
-        rx.badge(
-            "2. Review & Calibrate",
-            variant=rx.cond(CreateJobState.step == 2, "solid", "soft"),
-            color_scheme="violet",
+        rx.text(
+            label,
             size="2",
+            weight=rx.cond(is_current, "bold", "regular"),
+            color=rx.cond(is_current, rx.color("violet", 11), rx.color("gray", 10)),
+            white_space="nowrap",
         ),
         spacing="2",
         align="center",
     )
 
 
+def _step_connector() -> rx.Component:
+    """Accent once step 1 is behind us, border-colored while it's still ahead."""
+    return rx.box(
+        height="1px",
+        flex="1",
+        min_width="2em",
+        margin_top="14px",
+        background=rx.cond(CreateJobState.step > 1, rx.color("violet", 9), rx.color("gray", 7)),
+    )
+
+
+def _step_indicator() -> rx.Component:
+    return rx.hstack(
+        rx.spacer(),
+        _step_dot(1, "Job Description"),
+        _step_connector(),
+        _step_dot(2, "Review & Calibrate"),
+        rx.spacer(),
+        width="100%",
+        align="start",
+        spacing="3",
+    )
+
+
 # ── Step 1 ────────────────────────────────────────────────────────────────────
 
 
+def _manual_entry_link(label: str = "Or enter criteria manually →") -> rx.Component:
+    """Escape hatch for a role with no JD to paste — goes straight to step 2 with one
+    blank criterion row."""
+    return button(
+        label,
+        tier="tertiary",
+        on_click=CreateJobState.start_manual,
+        size="2",
+        padding_x="0",
+    )
+
+
 def _step_1() -> rx.Component:
+    parsing = CreateJobState.is_parsing
     return rx.vstack(
         rx.text(
-            "Paste a job description — it's parsed by the LLM into structured requirements "
+            "Paste a job description — the AI extracts structured screening criteria "
             "you can review and edit before the job goes live.",
             color=rx.color("gray", 11),
             size="2",
@@ -89,6 +142,9 @@ def _step_1() -> rx.Component:
                 placeholder="Senior Python Engineer",
                 value=CreateJobState.title,
                 on_change=CreateJobState.set_title,
+                # read_only, not disabled: a disabled input greys the text out, and the
+                # user should still be able to read what they typed while it parses.
+                read_only=parsing,
                 width="100%",
                 size="3",
             ),
@@ -97,27 +153,71 @@ def _step_1() -> rx.Component:
         ),
         rx.vstack(
             rx.text("Job Description", size="2", weight="medium"),
-            rx.text_area(
-                placeholder="Paste the full JD here...",
-                value=CreateJobState.jd_raw,
-                on_change=CreateJobState.set_jd_raw,
-                height="300px",
+            rx.box(
+                rx.text_area(
+                    placeholder="Paste the full job description here…",
+                    value=CreateJobState.jd_raw,
+                    on_change=CreateJobState.set_jd_raw,
+                    read_only=parsing,
+                    min_height="300px",
+                    width="100%",
+                ),
+                rx.cond(
+                    CreateJobState.jd_char_count != "",
+                    rx.text(
+                        CreateJobState.jd_char_count,
+                        size="1",
+                        color=rx.color("gray", 10),
+                        position="absolute",
+                        bottom="0.6em",
+                        right="0.9em",
+                        background="var(--rh-card)",
+                        padding_x="0.35em",
+                        pointer_events="none",
+                    ),
+                ),
+                # .rh-parsing pulses the border while the LLM call is in flight and
+                # falls back to a static accent border under prefers-reduced-motion.
+                class_name=rx.cond(parsing, "rh-parsing", ""),
+                position="relative",
                 width="100%",
+                border_radius="var(--radius-3)",
             ),
             width="100%",
             spacing="1",
         ),
         rx.cond(
             CreateJobState.error_message != "",
-            rx.callout(CreateJobState.error_message, icon="triangle-alert", color_scheme="red"),
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("triangle-alert", size=14, color=rx.color("red", 10)),
+                    rx.text(
+                        CreateJobState.error_message,
+                        size="2",
+                        color=rx.color("red", 11),
+                        role="alert",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                _manual_entry_link("Enter criteria manually →"),
+                spacing="1",
+                align="start",
+                width="100%",
+            ),
         ),
-        button(
-            rx.icon("sparkles", size=14),
-            "Parse JD Criteria",
-            on_click=CreateJobState.parse_criteria,
-            loading=CreateJobState.is_parsing,
-            size="3",
-            width="fit-content",
+        rx.vstack(
+            button(
+                rx.cond(parsing, rx.spinner(size="2"), rx.icon("sparkles", size=14)),
+                rx.cond(parsing, "Parsing…", "Parse JD Criteria"),
+                on_click=CreateJobState.parse_criteria,
+                disabled=parsing,
+                size="3",
+                width="fit-content",
+            ),
+            _manual_entry_link(),
+            spacing="1",
+            align="start",
         ),
         width="100%",
         spacing="4",
@@ -128,102 +228,73 @@ def _step_1() -> rx.Component:
 
 
 def _skill_tag(skill: str, removable: bool = True) -> rx.Component:
-    if not removable:
-        return rx.badge(skill, variant="outline", color_scheme="gray", size="2")
-    return rx.badge(
-        rx.hstack(
-            rx.text(skill),
-            rx.icon(
-                "x",
-                size=12,
-                cursor="pointer",
-                on_click=CreateJobState.remove_required_skill(skill),
-            ),
-            spacing="1",
-            align="center",
-        ),
-        variant="soft",
-        color_scheme="violet",
-        size="2",
+    """Read-only chip for the post-create summary panel."""
+    return rx.badge(skill, variant="outline", color_scheme="gray", size="2")
+
+
+def _level_control(index: rx.Var, level: rx.Var) -> rx.Component:
+    """Three-position importance picker. Segmented rather than a numeric slider —
+    the pipeline only distinguishes three cases, so a 0-1 weight would invent
+    precision it can't act on."""
+    return rx.segmented_control.root(
+        *[rx.segmented_control.item(label, value=value) for value, label in CRITERION_LEVELS],
+        value=level,
+        on_change=lambda v: CreateJobState.set_criterion_level(index, v),
+        size="1",
     )
 
 
-def _preferred_skill_tag(skill: str) -> rx.Component:
-    return rx.badge(
-        rx.hstack(
-            rx.text(skill),
-            rx.icon(
-                "x",
-                size=12,
-                cursor="pointer",
-                on_click=CreateJobState.remove_preferred_skill(skill),
-            ),
-            spacing="1",
-            align="center",
+def _criterion_row(criterion: dict, index: rx.Var) -> rx.Component:
+    return rx.hstack(
+        rx.input(
+            value=criterion["text"].to(str),
+            on_change=lambda v: CreateJobState.set_criterion_text(index, v),
+            placeholder="e.g. Python",
+            size="2",
+            flex="1",
+            min_width="0",
         ),
-        variant="soft",
-        color_scheme="blue",
-        size="2",
+        _level_control(index, criterion["level"].to(str)),
+        rx.icon_button(
+            rx.icon("x", size=14),
+            on_click=CreateJobState.remove_criterion(index),
+            variant="ghost",
+            color_scheme="red",
+            size="1",
+            aria_label="Remove this criterion",
+        ),
+        width="100%",
+        spacing="2",
+        align="center",
+        wrap="wrap",
     )
 
 
-def _must_have_tag(must_have: str, removable: bool = True) -> rx.Component:
-    if not removable:
-        return rx.badge(must_have, variant="outline", color_scheme="gray", size="2")
-    return rx.badge(
-        rx.hstack(
-            rx.text(must_have),
-            rx.icon(
-                "x",
-                size=12,
-                cursor="pointer",
-                on_click=CreateJobState.remove_must_have(must_have),
-            ),
-            spacing="1",
-            align="center",
-        ),
-        variant="outline",
-        color_scheme="gray",
-        size="2",
-    )
-
-
-def _skills_editor() -> rx.Component:
+def _criteria_editor() -> rx.Component:
     return rx.vstack(
-        rx.text("Required skills", weight="medium", size="2"),
-        rx.flex(
-            rx.foreach(CreateJobState.required_skills, lambda s: _skill_tag(s)),
-            wrap="wrap",
-            gap="2",
-        ),
-        rx.hstack(
-            rx.input(
-                placeholder="Add a required skill...",
-                value=CreateJobState.new_skill_input,
-                on_change=CreateJobState.set_new_skill_input,
-                on_key_down=lambda k: rx.cond(
-                    k == "Enter", CreateJobState.add_required_skill(), rx.console_log("")
-                ),
-                size="2",
-                width="100%",
-            ),
-            button("Add", tier="secondary", on_click=CreateJobState.add_required_skill, size="2"),
-            width="100%",
-            spacing="2",
+        rx.text("Screening criteria", weight="medium", size="3"),
+        rx.text(
+            "Nice to have counts toward the skill-overlap score. Important is also shown "
+            "to the LLM judge. Required additionally eliminates candidates who lack it.",
+            size="1",
+            color=rx.color("gray", 11),
         ),
         rx.cond(
-            CreateJobState.preferred_skills.length() > 0,
+            CreateJobState.criteria.length() > 0,
             rx.vstack(
-                rx.text("Preferred skills", weight="medium", size="2"),
-                rx.flex(
-                    rx.foreach(CreateJobState.preferred_skills, _preferred_skill_tag),
-                    wrap="wrap",
-                    gap="2",
-                ),
+                rx.foreach(CreateJobState.criteria, _criterion_row),
                 spacing="2",
                 width="100%",
-                align="start",
             ),
+            rx.text("No criteria yet — add one below.", size="2", color=rx.color("gray", 10)),
+        ),
+        button(
+            rx.icon("plus", size=14),
+            "Add criterion",
+            tier="tertiary",
+            on_click=CreateJobState.add_criterion,
+            size="2",
+            padding_x="0",
         ),
         width="100%",
         spacing="3",
@@ -315,33 +386,7 @@ def _step_2() -> rx.Component:
             width="100%",
             spacing="4",
         ),
-        _skills_editor(),
-        rx.vstack(
-            rx.text("Must-haves", weight="medium", size="2"),
-            rx.flex(
-                rx.foreach(CreateJobState.must_haves, lambda m: _must_have_tag(m)),
-                wrap="wrap",
-                gap="2",
-            ),
-            rx.hstack(
-                rx.input(
-                    placeholder="Add a must-have...",
-                    value=CreateJobState.new_must_have_input,
-                    on_change=CreateJobState.set_new_must_have_input,
-                    on_key_down=lambda k: rx.cond(
-                        k == "Enter", CreateJobState.add_must_have(), rx.console_log("")
-                    ),
-                    size="2",
-                    width="100%",
-                ),
-                button("Add", tier="secondary", on_click=CreateJobState.add_must_have, size="2"),
-                width="100%",
-                spacing="2",
-            ),
-            spacing="2",
-            width="100%",
-            align="start",
-        ),
+        _criteria_editor(),
         rx.divider(),
         _weights_editor(),
         rx.divider(),
@@ -374,11 +419,19 @@ def _step_2() -> rx.Component:
                 on_click=CreateJobState.back_to_step_1,
                 size="3",
             ),
-            button(
-                "Confirm & Activate Job",
-                on_click=CreateJobState.submit,
-                loading=CreateJobState.is_submitting,
-                size="3",
+            rx.tooltip(
+                button(
+                    "Confirm & Activate Job",
+                    on_click=CreateJobState.submit,
+                    loading=CreateJobState.is_submitting,
+                    disabled=~CreateJobState.has_criteria,
+                    size="3",
+                ),
+                content=rx.cond(
+                    CreateJobState.has_criteria,
+                    "Create the job and start screening",
+                    "Add at least one criterion first",
+                ),
             ),
             spacing="3",
         ),
@@ -455,7 +508,7 @@ def _created_job_panel() -> rx.Component:
                         rx.flex(
                             rx.foreach(
                                 CreateJobState.must_haves,
-                                lambda m: _must_have_tag(m, removable=False),
+                                lambda m: _skill_tag(m, removable=False),
                             ),
                             wrap="wrap",
                             gap="2",

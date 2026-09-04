@@ -84,3 +84,30 @@ body {
 [data-sonner-toast] {
   border-radius: var(--radius-4) !important;
 }
+
+/* Textarea border while the JD parse is in flight (create_job step 1). The pulse is
+   decorative, so it is dropped for reduced-motion users — they get the same static
+   accent border, which is what carries the actual "busy" information. */
+.rh-parsing {
+  border: 1px solid var(--accent-9);
+  animation: rh-pulse 2s ease-in-out infinite;
+}
+
+@keyframes rh-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    border-color: var(--accent-9);
+  }
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-9) 22%, transparent);
+    border-color: var(--accent-10);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-parsing {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-9) 22%, transparent);
+  }
+}
