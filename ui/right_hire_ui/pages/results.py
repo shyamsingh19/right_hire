@@ -74,8 +74,27 @@ def _queue_card(row: dict) -> rx.Component:
         ("Reject", rx.color("red", 7)),
         rx.color("gray", 5),
     )
+    candidate_id = row["candidate_id"].to(str)
+    is_selected = ResultsState.selected_ids.contains(candidate_id)
     return rx.vstack(
         rx.hstack(
+            # Hidden until the card is hovered or focused (see .rh-select in
+            # styles.css); forced visible whenever anything is selected, so an active
+            # selection is never invisible. Driven by a class, not an inline opacity —
+            # an inline style would beat the :hover rule.
+            rx.box(
+                rx.checkbox(
+                    checked=is_selected,
+                    on_change=ResultsState.toggle_selected(candidate_id),
+                    size="1",
+                    aria_label="Select " + row["name"].to(str),
+                ),
+                class_name=rx.cond(
+                    ResultsState.selected_count > 0, "rh-select rh-select-shown", "rh-select"
+                ),
+                display="flex",
+                align_items="center",
+            ),
             rx.text(row["name"].to(str), weight="bold", size="3"),
             rx.spacer(),
             rx.cond(
@@ -139,6 +158,15 @@ def _candidate_queue() -> rx.Component:
     rows = ResultsState.queue_rows
     return rx.vstack(
         rx.hstack(
+            rx.tooltip(
+                rx.checkbox(
+                    checked=ResultsState.all_visible_selected,
+                    on_change=ResultsState.toggle_select_all,
+                    size="1",
+                    aria_label="Select all candidates in this filter",
+                ),
+                content="Select all in this filter",
+            ),
             _queue_tabs(),
             rx.spacer(),
             button(
@@ -773,22 +801,30 @@ def _processing_banner() -> rx.Component:
 
 def _summary_pill(label: str, count: rx.Var, color: str, tab: str = "") -> rx.Component:
     """Compact rollup that doubles as a filter shortcut — the old five-number stats
-    block sat above the queue and pushed the actual work off-screen."""
-    pill = rx.badge(
+    block sat above the queue and pushed the actual work off-screen.
+
+    Rendered as a real button when it filters, so it gets keyboard focus and a focus
+    ring for free instead of being a div with an onclick.
+    """
+    if not tab:
+        return rx.badge(
+            count.to(str) + " " + label,
+            variant="soft",
+            color_scheme=color,
+            size="2",
+            radius="full",
+        )
+    is_active = ResultsState.queue_tab == tab
+    return rx.button(
         count.to(str) + " " + label,
-        variant="soft",
+        on_click=ResultsState.toggle_queue_tab(tab),
+        variant=rx.cond(is_active, "solid", "soft"),
         color_scheme=color,
         size="2",
         radius="full",
-    )
-    if not tab:
-        return pill
-    return rx.box(
-        pill,
-        on_click=ResultsState.set_queue_tab(tab),
         cursor="pointer",
-        role="button",
-        aria_label="Filter to " + label,
+        aria_pressed=is_active.to_string(),
+        aria_label=rx.cond(is_active, "Clear the " + label + " filter", "Filter to " + label),
     )
 
 
@@ -809,30 +845,104 @@ def _summary_pills() -> rx.Component:
     )
 
 
+def _bulk_action_bar() -> rx.Component:
+    """Pinned to the viewport rather than inserted above the queue: an inline bar
+    would shove every card down the moment a checkbox is ticked."""
+    n = ResultsState.selected_count
+    return rx.cond(
+        n > 0,
+        rx.box(
+            rx.hstack(
+                rx.text(n.to(str) + " selected", size="2", weight="medium"),
+                rx.spacer(),
+                button(
+                    rx.icon("download", size=14),
+                    "Export selected",
+                    tier="secondary",
+                    on_click=ResultsState.export_selected,
+                    size="2",
+                ),
+                button(
+                    rx.icon("refresh-cw", size=14),
+                    "Retry selected",
+                    tier="ghost",
+                    on_click=ResultsState.retry_selected,
+                    loading=ResultsState.is_retrying_all,
+                    disabled=ResultsState.selected_error_count == 0,
+                    size="2",
+                ),
+                button(
+                    rx.icon("trash-2", size=14),
+                    "Delete selected",
+                    tier="danger",
+                    on_click=ResultsState.ask_job_action("selected"),
+                    size="2",
+                ),
+                button(
+                    "Clear selection",
+                    tier="tertiary",
+                    on_click=ResultsState.clear_selection,
+                    size="2",
+                ),
+                spacing="3",
+                align="center",
+                width="100%",
+                max_width="960px",
+                margin="0 auto",
+            ),
+            position="fixed",
+            bottom="0",
+            left="0",
+            right="0",
+            padding="0.9em 2em",
+            background="var(--rh-card)",
+            border_top=f"1px solid {rx.color('gray', 6)}",
+            box_shadow="0 -2px 12px rgba(0,0,0,0.08)",
+            z_index="20",
+            role="region",
+            aria_label="Bulk actions for selected candidates",
+        ),
+    )
+
+
 def _job_action_dialog() -> rx.Component:
     """Shared confirm for both destructive job actions, opened from the ⋯ menu.
     Deleting all candidates keeps the JD/weights/thresholds so a fresh batch can be
     uploaded; deleting the job takes everything."""
     is_job = ResultsState.confirm_job_action == "job"
+    is_selected = ResultsState.confirm_job_action == "selected"
     return rx.alert_dialog.root(
         rx.alert_dialog.content(
             rx.alert_dialog.title(
-                rx.cond(is_job, "Delete this job?", "Delete all candidates for this job?")
+                rx.cond(
+                    is_selected,
+                    "Delete " + ResultsState.selected_count.to(str) + " selected candidates?",
+                    rx.cond(is_job, "Delete this job?", "Delete all candidates for this job?"),
+                )
             ),
             rx.alert_dialog.description(
                 rx.cond(
-                    is_job,
-                    "All candidates and evaluation results for this job will be permanently "
-                    "deleted. This cannot be undone.",
-                    "All candidates and their evaluation results will be permanently deleted. "
-                    "The job itself (description, weights, thresholds) is kept, so you can "
-                    "upload a fresh batch afterward. This cannot be undone.",
+                    is_selected,
+                    "The selected candidates and their evaluation results will be "
+                    "permanently deleted. This cannot be undone.",
+                    rx.cond(
+                        is_job,
+                        "All candidates and evaluation results for this job will be "
+                        "permanently deleted. This cannot be undone.",
+                        "All candidates and their evaluation results will be permanently "
+                        "deleted. The job itself (description, weights, thresholds) is kept, "
+                        "so you can upload a fresh batch afterward. This cannot be undone.",
+                    ),
                 ),
             ),
             rx.flex(
                 button("Cancel", tier="ghost", on_click=ResultsState.cancel_job_action),
                 rx.button(
-                    rx.cond(is_job, "Delete job", "Delete all candidates"),
+                    rx.cond(
+                        is_selected,
+                        "Delete selected",
+                        rx.cond(is_job, "Delete job", "Delete all candidates"),
+                    ),
                     color_scheme="red",
                     on_click=ResultsState.run_job_action,
                     loading=ResultsState.is_deleting_job | ResultsState.is_deleting_all,
@@ -983,4 +1093,5 @@ def results_page() -> rx.Component:
         _candidate_inspector_modal(),
         _delete_candidate_dialog(),
         _job_action_dialog(),
+        _bulk_action_bar(),
     )

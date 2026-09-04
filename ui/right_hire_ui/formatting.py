@@ -34,13 +34,18 @@ def bucket_tone(bucket: str, fit: float, maybe: float) -> str:
     return "reject"
 
 
-def shortlist_csv(rows: list[dict]) -> str:
-    """CSV of the Fit + Maybe candidates, in the order the queue shows them."""
+def shortlist_csv(rows: list[dict], verdicts: tuple[str, ...] | None = SHORTLIST_VERDICTS) -> str:
+    """CSV of candidates in the order the queue shows them.
+
+    `verdicts` filters which ones are included; pass None to take the rows as given
+    (used by the bulk "Export selected" action, where the user's selection *is* the
+    filter and dropping a Reject they deliberately ticked would be wrong).
+    """
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(SHORTLIST_COLUMNS)
     for r in rows:
-        if r.get("verdict") not in SHORTLIST_VERDICTS:
+        if verdicts is not None and r.get("verdict") not in verdicts:
             continue
         writer.writerow(
             [
@@ -81,6 +86,12 @@ def _demo() -> None:
     assert len(out) == 3, out  # header + Fit + Maybe, Reject dropped
     assert '"Go, K8s"' in out[1]
     assert out[2].startswith("C,,0.52,Maybe")
+
+    # verdicts=None takes the rows as given — the selection is the filter
+    unfiltered = shortlist_csv(rows, verdicts=None).splitlines()
+    assert len(unfiltered) == 4, unfiltered  # header + all three, Reject kept
+    assert unfiltered[2].startswith("B,,0.10,Reject")
+
     print("formatting self-check OK")
 
 

@@ -15,6 +15,7 @@ VERDICT_FILTERS = ["All", "Fit", "Maybe", "Reject"]
 _ACTIVE_STATUSES = ("pending", "processing")
 _POLL_INTERVAL_SECONDS = 5
 _POLL_MAX_ITERATIONS = 24  # ~2 minutes, then the user can hit "Load Results" again
+_MIN_THRESHOLD_GAP = 0.05  # one slider step — Maybe must stay strictly below Fit
 
 
 def _build_row(item: dict, required_skills: list[str] | None = None) -> dict:
@@ -182,6 +183,10 @@ class ResultsState(AppState):
     def set_queue_tab(self, value: str) -> None:
         self.queue_tab = value
 
+    def toggle_queue_tab(self, value: str) -> None:
+        """Pill click: filter to this bucket, or back to All if it's already active."""
+        self.queue_tab = "All" if self.queue_tab == value else value
+
     def toggle_calibrate(self) -> None:
         self.show_calibrate = not self.show_calibrate
 
@@ -191,7 +196,105 @@ class ResultsState(AppState):
     # Destructive actions live in ⋯ menus, and a Radix dialog nested inside an open
     # menu unmounts with it — so the confirm dialogs are controlled by these instead.
     pending_delete_candidate_id: str = ""
-    confirm_job_action: str = ""  # "" | "candidates" | "job"
+    confirm_job_action: str = ""  # "" | "candidates" | "job" | "selected"
+
+    # Bulk selection. Stored as a list because Reflex state can't serialize a set.
+    selected_ids: list[str] = []  # noqa: RUF012
+
+    def toggle_selected(self, candidate_id: str) -> None:
+        if candidate_id in self.selected_ids:
+            self.selected_ids = [i for i in self.selected_ids if i != candidate_id]
+        else:
+            self.selected_ids = [*self.selected_ids, candidate_id]
+
+    def clear_selection(self) -> None:
+        self.selected_ids = []
+
+    def toggle_select_all(self) -> None:
+        """Selects everything in the *current* tab, not the whole batch — the checkbox
+        sits in the filter row, so that is what it visually belongs to."""
+        visible = [r["candidate_id"] for r in self.queue_rows]
+        if all(i in self.selected_ids for i in visible) and visible:
+            self.selected_ids = [i for i in self.selected_ids if i not in visible]
+        else:
+            self.selected_ids = self.selected_ids + [
+                i for i in visible if i not in self.selected_ids
+            ]
+
+    @rx.var
+    def selected_count(self) -> int:
+        return len(self.selected_ids)
+
+    @rx.var
+    def all_visible_selected(self) -> bool:
+        visible = [r["candidate_id"] for r in self.queue_rows]
+        return bool(visible) and all(i in self.selected_ids for i in visible)
+
+    @rx.var
+    def selected_rows(self) -> list[dict[str, Any]]:
+        return [r for r in self.display_rows if r["candidate_id"] in self.selected_ids]
+
+    @rx.var
+    def selected_error_count(self) -> int:
+        return sum(1 for r in self.selected_rows if r["is_error"])
+
+    def export_selected(self):
+        """Same CSV builder as the shortlist, with the selection as its input."""
+        rows = self.selected_rows
+        if not rows:
+            return rx.toast.info("Nothing selected.")
+        title = (self.selected_job_title or "job").lower().replace(" ", "_")
+        return rx.download(
+            data=shortlist_csv(rows, verdicts=None),
+            filename=f"right_hire_{title}_selected.csv",
+        )
+
+    async def retry_selected(self):
+        """Re-queues only the selected candidates that are actually in an error state."""
+        targets = [r["candidate_id"] for r in self.selected_rows if r["is_error"]]
+        if not targets:
+            yield rx.toast.info("No selected candidate is in an error state.")
+            return
+        self.is_retrying_all = True
+        yield
+        failed = 0
+        for candidate_id in targets:
+            try:
+                await api_client.retry_candidate(self.api_key, self.selected_job_id, candidate_id)
+            except (httpx.HTTPError, api_client.ApiError):
+                failed += 1
+        self.is_retrying_all = False
+        ok = len(targets) - failed
+        if ok:
+            yield rx.toast.success(f"Re-queued {ok} candidate{'s' if ok != 1 else ''}.")
+        if failed:
+            yield rx.toast.error(
+                f"{failed} could not be re-queued — they may have no resume on file."
+            )
+        yield ResultsState.load_results
+
+    async def delete_selected(self):
+        """Deletes every selected candidate. Gated by the shared confirm dialog."""
+        targets = list(self.selected_ids)
+        if not targets:
+            return
+        self.is_deleting_all = True
+        yield
+        failed = 0
+        for candidate_id in targets:
+            try:
+                await api_client.delete_candidate(self.api_key, self.selected_job_id, candidate_id)
+            except (httpx.HTTPError, api_client.ApiError):
+                failed += 1
+        self.results = [r for r in self.results if r["candidate"]["id"] not in targets]
+        self.offset = len(self.results)
+        self.selected_ids = []
+        self.is_deleting_all = False
+        deleted = len(targets) - failed
+        if deleted:
+            yield rx.toast.success(f"Deleted {deleted} candidate{'s' if deleted != 1 else ''}.")
+        if failed:
+            yield rx.toast.error(f"{failed} could not be deleted.")
 
     def ask_delete_candidate(self, candidate_id: str) -> None:
         self.pending_delete_candidate_id = candidate_id
@@ -219,6 +322,8 @@ class ResultsState(AppState):
             return ResultsState.delete_job(self.selected_job_id)
         if kind == "candidates":
             return ResultsState.delete_all_candidates
+        if kind == "selected":
+            return ResultsState.delete_selected
         return None
 
     @rx.var
@@ -242,10 +347,17 @@ class ResultsState(AppState):
         self.inspect_candidate_id = ""
 
     def set_draft_fit_threshold(self, value: list[float]) -> None:
-        self.draft_fit_threshold = value[0]
+        """Fit pushes Maybe down ahead of it. Clamped here rather than only validated
+        on Apply — a Maybe above Fit makes the verdict bands incoherent, so the UI
+        should never let the sliders show that state at all."""
+        self.draft_fit_threshold = round(value[0], 2)
+        ceiling = round(self.draft_fit_threshold - _MIN_THRESHOLD_GAP, 2)
+        if self.draft_maybe_threshold > ceiling:
+            self.draft_maybe_threshold = max(0.0, ceiling)
 
     def set_draft_maybe_threshold(self, value: list[float]) -> None:
-        self.draft_maybe_threshold = value[0]
+        ceiling = round(self.draft_fit_threshold - _MIN_THRESHOLD_GAP, 2)
+        self.draft_maybe_threshold = max(0.0, min(round(value[0], 2), ceiling))
 
     @rx.var
     def histogram(self) -> list[dict]:
@@ -560,6 +672,7 @@ class ResultsState(AppState):
         self.results = []
         self.has_more = True
         self.load_error = ""
+        self.selected_ids = []
         self.is_loading = True
         yield
 

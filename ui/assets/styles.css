@@ -111,3 +111,23 @@ body {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-9) 22%, transparent);
   }
 }
+
+/* Bulk-selection checkbox on a candidate card: out of the way at rest, revealed on
+   hover or keyboard focus. Kept visible whenever a selection exists (.rh-select-shown)
+   so an active selection is never hidden. */
+.rh-select {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.rh-row:hover .rh-select,
+.rh-select:focus-within,
+.rh-select-shown {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-select {
+    transition: none;
+  }
+}

@@ -11,6 +11,26 @@ from right_hire_ui.states.upload_state import CANONICAL_FIELDS, FIELD_LABELS, Up
 
 UPLOAD_ID = "candidate_upload"
 
+# Client-side view of the file input — rx.selected_files exposes names only, so the
+# byte size shown in the audit spec isn't available without custom JS. Name + Remove
+# is the honest subset.
+_has_file = rx.selected_files(UPLOAD_ID).length() > 0
+
+
+def _selected_file_row() -> rx.Component:
+    return rx.hstack(
+        rx.icon("file-spreadsheet", size=20, color=rx.color("violet", 9)),
+        rx.text(rx.selected_files(UPLOAD_ID)[0], size="2", weight="medium"),
+        button(
+            "Remove",
+            tier="danger",
+            size="1",
+            on_click=rx.clear_selected_files(UPLOAD_ID),
+        ),
+        spacing="3",
+        align="center",
+    )
+
 
 def _mapping_row(field: str) -> rx.Component:
     label = FIELD_LABELS.get(field, field)
@@ -251,19 +271,27 @@ def upload_candidates_page() -> rx.Component:
                             ~UploadState.show_mapping,
                             rx.vstack(
                                 rx.upload(
-                                    rx.vstack(
-                                        rx.icon("cloud-upload", size=28, color=rx.color("gray", 9)),
-                                        rx.text("Drag & drop, or click to select a file", size="2"),
-                                        rx.text(
-                                            ".xlsx or .csv", size="1", color=rx.color("gray", 10)
-                                        ),
-                                        align="center",
-                                        spacing="1",
-                                    ),
-                                    rx.foreach(
-                                        rx.selected_files(UPLOAD_ID),
-                                        lambda f: rx.badge(
-                                            f, variant="soft", color_scheme="violet"
+                                    # Prompt is replaced by the filename once a file is
+                                    # picked, so the zone always reflects its own state.
+                                    rx.cond(
+                                        _has_file,
+                                        _selected_file_row(),
+                                        rx.vstack(
+                                            rx.icon(
+                                                "cloud-upload", size=28, color=rx.color("gray", 9)
+                                            ),
+                                            rx.text(
+                                                "Drag a .xlsx or .csv file here, or click to "
+                                                "browse",
+                                                size="2",
+                                            ),
+                                            rx.text(
+                                                "Each row should be one candidate.",
+                                                size="1",
+                                                color=rx.color("gray", 10),
+                                            ),
+                                            align="center",
+                                            spacing="1",
                                         ),
                                     ),
                                     id=UPLOAD_ID,
@@ -278,6 +306,10 @@ def upload_candidates_page() -> rx.Component:
                                     border=f"1.5px dashed {rx.color('gray', 7)}",
                                     border_radius="var(--radius-4)",
                                     padding="2em",
+                                    min_height="200px",
+                                    display="flex",
+                                    align_items="center",
+                                    justify_content="center",
                                     width="100%",
                                 ),
                                 rx.hstack(
@@ -296,6 +328,9 @@ def upload_candidates_page() -> rx.Component:
                                             rx.upload_files(upload_id=UPLOAD_ID)
                                         ),
                                         loading=UploadState.is_previewing,
+                                        # A primary button that can only error is worse
+                                        # than one that is visibly not ready yet.
+                                        disabled=~_has_file,
                                         size="3",
                                     ),
                                     rx.spacer(),
