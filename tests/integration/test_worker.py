@@ -224,7 +224,7 @@ def test_sweep_requeues_a_stuck_processing_candidate(sync_factory, monkeypatch):
     _make_stale(sync_factory, candidate_id, minutes_ago=120, stale_retries=1)
 
     fake_queue = _FakeQueue()
-    monkeypatch.setattr(tasks_module, "_get_queue", lambda: fake_queue)
+    monkeypatch.setattr(tasks_module, "get_ats_queue", lambda: fake_queue)
 
     result = tasks_module.sweep_stale_candidates()
 
@@ -241,7 +241,7 @@ def test_sweep_fails_candidate_past_max_retries(sync_factory, monkeypatch):
     _make_stale(sync_factory, candidate_id, minutes_ago=120, stale_retries=3)
 
     fake_queue = _FakeQueue()
-    monkeypatch.setattr(tasks_module, "_get_queue", lambda: fake_queue)
+    monkeypatch.setattr(tasks_module, "get_ats_queue", lambda: fake_queue)
 
     result = tasks_module.sweep_stale_candidates()
 
@@ -260,7 +260,7 @@ def test_sweep_leaves_fresh_candidates_alone(sync_factory, monkeypatch):
     candidate_id, job_id = _seed_job_and_candidate(sync_factory, _RESUME)
 
     fake_queue = _FakeQueue()
-    monkeypatch.setattr(tasks_module, "_get_queue", lambda: fake_queue)
+    monkeypatch.setattr(tasks_module, "get_ats_queue", lambda: fake_queue)
 
     result = tasks_module.sweep_stale_candidates()
 
@@ -288,7 +288,7 @@ class _FakeSchedulingQueue(_FakeQueue):
 
 def test_ensure_stale_sweep_scheduled_is_idempotent(monkeypatch):
     fake_queue = _FakeSchedulingQueue()
-    monkeypatch.setattr(tasks_module, "_get_queue", lambda: fake_queue)
+    monkeypatch.setattr(tasks_module, "get_ats_queue", lambda: fake_queue)
 
     tasks_module.ensure_stale_sweep_scheduled()
     assert len(fake_queue.enqueued) == 1

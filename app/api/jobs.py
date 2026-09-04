@@ -8,12 +8,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
-from app.config import settings
 from app.db import get_db
 from app.llm.base import LLMProvider, LLMUnavailableError
 from app.llm.factory import get_provider
 from app.models import Candidate, CandidateStatus, Evaluation, Job, User
 from app.pipeline.parse import parse_jd
+from app.queue import get_ats_queue
 from app.schemas import JdParseRequest, JobCreate, JobProgress, JobResponse, JobUpdate, ParsedJD
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -25,11 +25,9 @@ def _enqueue_jd_parse(job_id: str) -> bool:
     the queue itself is unreachable — the job still exists with jd_parse_pending=True
     and can be retried by re-saving it, so this must not turn into a request failure."""
     try:
-        import redis as redis_lib
-        from rq import Queue, Retry
+        from rq import Retry
 
-        r = redis_lib.from_url(settings.effective_redis_url)
-        Queue("ats", connection=r).enqueue(
+        get_ats_queue().enqueue(
             "app.workers.tasks.parse_job_description",
             job_id,
             job_timeout=120,

@@ -5,7 +5,6 @@ import logging
 import uuid
 from pathlib import Path
 
-import redis as redis_lib
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from rq import Queue, Retry
 from sqlalchemy import delete, select, update
@@ -25,6 +24,7 @@ from app.pipeline.ingest import (
     parse_excel_raw,
     save_resume,
 )
+from app.queue import get_ats_queue
 from app.schemas import (
     BulkIngestResponse,
     CancelPendingResponse,
@@ -39,11 +39,6 @@ router = APIRouter(prefix="/jobs", tags=["ingest"])
 logger = logging.getLogger(__name__)
 
 _RESUME_EXTENSIONS = {".pdf", ".txt", ".md"}  # must match app/pipeline/parse.py:extract_text
-
-
-def _get_queue() -> Queue:
-    r = redis_lib.from_url(settings.effective_redis_url)
-    return Queue("ats", connection=r)
 
 
 def _validate_sheet_signature(filename: str, content: bytes) -> None:
@@ -154,7 +149,7 @@ async def retry_candidate(
     candidate.status = CandidateStatus.pending
     await db.commit()
 
-    queue = _get_queue()
+    queue = get_ats_queue()
     queued_ids, failed_ids = _enqueue_candidates(queue, job_id, [candidate.id])
     if failed_ids:
         candidate.status = CandidateStatus.failed
@@ -197,7 +192,7 @@ async def retry_failed_candidates(
     )
     await db.commit()
 
-    queue = _get_queue()
+    queue = get_ats_queue()
     queued_ids, failed_ids = _enqueue_candidates(queue, job_id, retryable_ids)
     if failed_ids:
         await db.execute(
@@ -351,7 +346,7 @@ async def ingest_candidates(
     await db.commit()
 
     # Enqueue after commit so IDs are persisted
-    queue = _get_queue()
+    queue = get_ats_queue()
     queued_ids, failed_ids = _enqueue_candidates(queue, job_id, candidate_ids)
 
     if failed_ids:
@@ -490,7 +485,7 @@ async def upload_candidate_resume(
     db.add(user)
     await db.commit()
 
-    queue = _get_queue()
+    queue = get_ats_queue()
     queued_ids, failed_ids = _enqueue_candidates(queue, job_id, [candidate.id])
     if failed_ids:
         user.credits += 1  # refund — never got queued

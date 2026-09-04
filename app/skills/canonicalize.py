@@ -48,15 +48,3 @@ def canonicalize_skill(skill: str, threshold: float = 0.75) -> str:
     if best_score >= threshold:
         return taxonomy[best_idx]
     return skill
-
-
-def canonicalize_skills(skills: list[str], threshold: float = 0.75) -> list[str]:
-    """Canonicalize a list of skills, deduplicating by canonical name."""
-    seen: set[str] = set()
-    result: list[str] = []
-    for skill in skills:
-        canon = canonicalize_skill(skill, threshold)
-        if canon not in seen:
-            seen.add(canon)
-            result.append(canon)
-    return result

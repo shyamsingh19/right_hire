@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from app.skills.canonicalize import canonicalize_skill, canonicalize_skills
+from app.skills.canonicalize import canonicalize_skill
 
 
 def _mock_canonicalizer(taxonomy: list[str], sims: list[float]):
@@ -50,17 +50,6 @@ def test_no_match_returns_original():
     ):
         result = canonicalize_skill("COBOL", threshold=0.75)
     assert result == "COBOL"
-
-
-def test_canonicalize_skills_deduplicates():
-    taxonomy = ["Python", "Docker"]
-    sims = [0.95, 0.2]
-    with patch(
-        "app.skills.canonicalize._get_canonicalizer",
-        return_value=_mock_canonicalizer(taxonomy, sims),
-    ):
-        result = canonicalize_skills(["python", "Python", "PYTHON"], threshold=0.75)
-    assert result.count("Python") == 1
 
 
 def test_no_model_returns_original():

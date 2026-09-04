@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from rq import Queue, Repeat, Retry
+from rq import Repeat, Retry
 from sqlalchemy import create_engine, event, exc, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -22,6 +22,7 @@ from app.pipeline.judge import judge_candidate
 from app.pipeline.match import match_candidate
 from app.pipeline.parse import extract_text, parse_jd, parse_resume
 from app.pipeline.score import aggregate_score, apply_thresholds
+from app.queue import get_ats_queue
 from app.schemas import ParsedJD, ParsedResume
 from app.skills.canonicalize import canonicalize_skill
 
@@ -126,13 +127,6 @@ def _get_redis():
     import redis as redis_lib
 
     return redis_lib.from_url(settings.effective_redis_url, decode_responses=True)
-
-
-def _get_queue() -> Queue:
-    import redis as redis_lib
-
-    r = redis_lib.from_url(settings.effective_redis_url)
-    return Queue("ats", connection=r)
 
 
 def parse_job_description(job_id: str) -> None:
@@ -359,7 +353,7 @@ def sweep_stale_candidates() -> dict:
             )
         ).all()
 
-        queue = _get_queue()
+        queue = get_ats_queue()
         for candidate in stale:
             if candidate.stale_retries >= settings.stale_candidate_max_retries:
                 candidate.status = CandidateStatus.failed
@@ -425,7 +419,7 @@ def ensure_stale_sweep_scheduled() -> None:
     itself re-enqueues sweep_stale_candidates every stale_sweep_interval_minutes
     indefinitely. Safe to call repeatedly — a no-op once the recurring job is scheduled.
     """
-    queue = _get_queue()
+    queue = get_ats_queue()
     if _SWEEP_JOB_ID in queue.scheduled_job_registry.get_job_ids():
         return
 
