@@ -16,10 +16,14 @@ def _make_engine(url: str):
     connect_args = {}
     if "sqlite" in url:
         connect_args["check_same_thread"] = False
-    # filess.io caps this account at 5 concurrent connections total, shared with the
-    # worker's sync engine (app/workers/tasks.py) — keep this pool small rather than
-    # SQLAlchemy's default (5 + 10 overflow), which alone would exceed the quota.
-    pool_kwargs = {} if "sqlite" in url else {"pool_size": 3, "max_overflow": 0}
+    # filess.io caps this account at 5 concurrent connections for the whole ACCOUNT —
+    # not per process, per host, or per deployment. Every uvicorn, every RQ worker (plus
+    # each of its forked work horses) and every `alembic upgrade head` draws from the
+    # same 5. Pooled connections are held while idle, so a generous pool_size silently
+    # squats slots the rest of the account then can't get. Budget per process:
+    #   API 1+1  |  worker 1 (x parent + work horse)  |  alembic 1 transient (NullPool)
+    # which leaves room for a second deployment (e.g. local dev against the same DB).
+    pool_kwargs = {} if "sqlite" in url else {"pool_size": 1, "max_overflow": 1}
     return create_async_engine(
         url,
         echo=False,

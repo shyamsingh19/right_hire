@@ -33,7 +33,7 @@ _cors_allowed_origins = (
 # Kept env-driven, not hardcoded, because Render/Railway inject the port at runtime
 # (see render.yaml's --backend-port $PORT).
 _frontend_port = int(os.getenv("REFLEX_FRONTEND_PORT", "3000"))
-_backend_port = int(os.getenv("REFLEX_BACKEND_PORT", "8000"))
+_backend_port = int(os.getenv("REFLEX_BACKEND_PORT", "8002"))
 
 config = rx.Config(
     app_name="right_hire_ui",

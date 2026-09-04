@@ -35,7 +35,13 @@ logger = logging.getLogger(__name__)
 # (the previous behavior) opens a brand new connection pool every time, which exhausts the
 # hosted MySQL's small concurrent-connection cap instead of reusing existing connections.
 _sync_engine = create_engine(
-    settings.database_url, pool_pre_ping=True, pool_recycle=280, pool_size=2, max_overflow=0
+    # pool_size=1: RQ forks one work horse at a time, so the parent and the horse each
+    # need a single connection. See app/db.py for the account-wide 5-connection budget.
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_recycle=280,
+    pool_size=1,
+    max_overflow=0,
 )
 
 
