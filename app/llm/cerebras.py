@@ -10,6 +10,10 @@ class CerebrasProvider(OpenAICompatibleProvider):
     provider_name = "Cerebras"
     base_url = "https://api.cerebras.ai/v1"
     _rate_limiter = _RateLimiter()
+    # Cerebras enforces the JSON schema server-side, which the default prompt-based "JSON"
+    # mode does not: under it gemma-4-31b emits an unterminated reply and instructor raises
+    # IncompleteOutputException at max_tokens. Same request in JSON_SCHEMA mode: ~90 tokens.
+    instructor_mode = "JSON_SCHEMA"
 
     def __init__(self, model: str | None = None) -> None:
         super().__init__(

@@ -39,35 +39,58 @@ SAMPLE_CANDIDATES = [
         "email": "alice@example.com",
         "yoe": 6.0,
         "location": "San Francisco, CA",
-        "resume_text": "6 years Python, PostgreSQL, Docker, Redis, FastAPI. Led 3 backend rewrites. AWS certified.",
+        "resume_text": (
+            "Senior backend engineer, 6 years of Python. Built and ran FastAPI services on "
+            "PostgreSQL with Redis caching, deployed in Docker on AWS. Led three backend "
+            "rewrites, owned SQL query optimisation for the reporting tier, and set up the "
+            "team's CI/CD pipelines. AWS certified."
+        ),
     },
     {
         "name": "Bob Smith",
         "email": "bob@example.com",
         "yoe": 4.5,
         "location": "Remote",
-        "resume_text": "4.5 years Python, PostgreSQL, Docker. Built data pipeline at FinTech startup.",
+        "resume_text": (
+            "Backend developer with 4.5 years of Python at a FinTech startup. Built the "
+            "ingestion pipeline that loads transaction data into PostgreSQL, tuned the slow "
+            "reporting queries, and packaged every service with Docker. No Kubernetes or "
+            "cloud ownership so far."
+        ),
     },
     {
         "name": "Carol Wang",
         "email": "carol@example.com",
         "yoe": 2.0,
         "location": "New York",
-        "resume_text": "2 years Python and Django. MySQL. No Docker experience yet.",
+        "resume_text": (
+            "Junior developer, 2 years of Python and Django on a MySQL-backed internal tool. "
+            "Comfortable writing views, models and unit tests. Has not used PostgreSQL, "
+            "Docker or any cloud platform yet, and is looking for a team that mentors."
+        ),
     },
     {
         "name": "Dan Lee",
         "email": "dan@example.com",
         "yoe": 8.0,
         "location": "San Francisco, CA",
-        "resume_text": "8 years Java and some Python. PostgreSQL expert. Kubernetes and Docker.",
+        "resume_text": (
+            "Platform engineer, 8 years of Java with some Python scripting on the side. "
+            "PostgreSQL expert — replication, partitioning and query plans. Runs the "
+            "company's Kubernetes clusters and builds the Docker images the rest of the "
+            "estate ships on."
+        ),
     },
     {
         "name": "Eva Müller",
         "email": "eva@example.com",
         "yoe": 5.0,
         "location": "Berlin",
-        "resume_text": "5 years Python, FastAPI, PostgreSQL, Redis. Open-source contributor. Remote-only.",
+        "resume_text": (
+            "5 years of Python, mostly FastAPI services backed by PostgreSQL and Redis. "
+            "Regular open-source contributor to async database tooling, and comfortable "
+            "profiling and rewriting slow SQL. Remote-only, based in Berlin."
+        ),
     },
 ]
 

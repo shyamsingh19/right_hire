@@ -103,6 +103,14 @@ class OpenAICompatibleProvider(LLMProvider):
             )
             resp.raise_for_status()
 
+    # Name of the instructor.Mode used to coax structured output out of the endpoint.
+    # "JSON" (prompt the model, parse the reply) is the portable default, but it is only
+    # as reliable as the model's instruction-following: gemma-4-31b on Cerebras never
+    # terminates under it and burns the whole max_tokens budget. Providers whose endpoint
+    # enforces the schema server-side should override with "JSON_SCHEMA" — see
+    # app/llm/cerebras.py. Held as a name, not the enum, so instructor stays a lazy import.
+    instructor_mode = "JSON"
+
     def _extra_create_kwargs(self) -> dict:
         """Hook for provider-specific chat-completion kwargs (e.g. reasoning_effort)."""
         return {}
@@ -161,7 +169,7 @@ class OpenAICompatibleProvider(LLMProvider):
                         base_url=self.base_url,
                         timeout=60.0,
                     ),
-                    mode=instructor.Mode.JSON,
+                    mode=getattr(instructor.Mode, self.instructor_mode),
                 )
                 result, completion = client.chat.completions.create_with_completion(
                     model=self.model,
@@ -206,8 +214,7 @@ class OpenAICompatibleProvider(LLMProvider):
                     content = data["choices"][0]["message"]["content"]
                     usage = data.get("usage", {})
                     logger.info(
-                        "%s.complete_json tokens (raw) — model=%s prompt=%s "
-                        "completion=%s total=%s",
+                        "%s.complete_json tokens (raw) — model=%s prompt=%s completion=%s total=%s",
                         type(self).__name__,
                         self.model,
                         usage.get("prompt_tokens"),
@@ -216,12 +223,16 @@ class OpenAICompatibleProvider(LLMProvider):
                     )
                     return schema.model_validate(json.loads(content))
         except httpx.HTTPError as exc:
-            raise LLMUnavailableError(f"{type(self).__name__}.complete_json unreachable: {exc}") from exc
+            raise LLMUnavailableError(
+                f"{type(self).__name__}.complete_json unreachable: {exc}"
+            ) from exc
         except Exception as exc:
             # openai/instructor raise their own APIConnectionError/APIStatusError subclasses
             # (not httpx.HTTPError) for network and auth failures against the endpoint.
             if type(exc).__module__.startswith("openai"):
-                raise LLMUnavailableError(f"{type(self).__name__}.complete_json failed: {exc}") from exc
+                raise LLMUnavailableError(
+                    f"{type(self).__name__}.complete_json failed: {exc}"
+                ) from exc
             raise
 
     def embed(self, texts: list[str]) -> list[list[float]]:

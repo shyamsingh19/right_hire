@@ -89,6 +89,12 @@ app/
   - JD ≤4000 chars
   - Judge tokens ≤300
 - `GroqProvider.embed()` falls back to local `SentenceTransformer`.
+- Structured output mode is per-provider (`instructor_mode`, default `"JSON"`); Cerebras must use
+  `"JSON_SCHEMA"` — under prompt-based JSON, `gemma-4-31b` never terminates and burns `max_tokens`.
+- **Local dev must not share prod's managed services.** One filess.io account = 5 connections total
+  (prod's uvicorn + RQ worker use them all), and prod's worker consumes the same Upstash `ats` queue,
+  stealing locally enqueued jobs. For local work use `DATABASE_URL=sqlite:///./dev.db` and comment out
+  `UPSTASH_REDIS_REST_*` so `effective_redis_url` falls back to local Redis.
 
 ### Auth & Multi-Tenancy
 
